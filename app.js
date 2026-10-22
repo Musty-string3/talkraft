@@ -21,7 +21,7 @@ let disk=null;
 function idbRead(){return new Promise((resolve,reject)=>{const req=disk.transaction('state','readonly').objectStore('state').get('main');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
 function idbWrite(snapshot){return new Promise((resolve,reject)=>{const tx=disk.transaction('state','readwrite');tx.objectStore('state').put(snapshot,'main');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)})}
 function save(){history.push(JSON.stringify(db));redoStack=[];updateUndoControls()}
-let saveState='saved',saveHideTimer=null;
+db.settings.autoNextEdit ??= false;let saveState='saved',saveHideTimer=null;
 function showSaveState(state){
  saveState=state;const el=$('saveState');if(!el)return;
  if(saveHideTimer){clearTimeout(saveHideTimer);saveHideTimer=null}
@@ -54,7 +54,7 @@ let favoritesOnly=false;function renderHome(){const host=$('projectList');const 
 for(const f of folders){const list=db.projects.filter(p=>p.folderId===f.id&&(!favoritesOnly||p.favorite)&&(p.title.toLowerCase().includes(term)||p.messages.some(m=>m.text.toLowerCase().includes(term))));if(term&&!list.length)continue;
 if(!openFolderId&&!favoritesOnly){const row=document.createElement('div');row.className='folder-row';row.innerHTML='<span>📁</span><span class="grow"></span><span class="arrow">›</span>';row.querySelector('.grow').textContent=f.name+' ('+list.length+')';row.onclick=()=>{openFolderId=f.id;renderHome()};const menu=document.createElement('button');menu.textContent='⋯';menu.setAttribute('aria-label','フォルダの操作');menu.onclick=e=>{e.stopPropagation();folderMenu(f.id)};row.append(menu);host.append(row);continue}
 const heading=document.createElement('div');heading.className='section-heading';heading.textContent='📁 '+f.name+'　('+list.length+' 件)';heading.onclick=()=>folderMenu(f.id);host.append(heading);
-for(const p of list){const row=document.createElement('button');row.className='item';row.innerHTML='<span class="emo">💬</span><div class="grow"><div></div><div class="sub"></div></div><span class="arrow">›</span>';row.querySelector('.grow>div').textContent=(p.favorite?'★ ':'')+p.title;row.querySelector('.sub').textContent=p.messages.length+' 件のコメント';row.onclick=()=>{current=p.id;activeMessage=null;pageTo('chat')};row.oncontextmenu=e=>{e.preventDefault();projectMenu(p.id)};let press;row.addEventListener('touchstart',()=>press=setTimeout(()=>projectMenu(p.id),550),{passive:true});['touchend','touchcancel','touchmove'].forEach(k=>row.addEventListener(k,()=>clearTimeout(press),{passive:true}));const more=document.createElement('button');more.textContent='⋯';more.className='iconbtn';more.onclick=e=>{e.stopPropagation();projectMenu(p.id)};row.append(more);host.append(row)} }
+for(const p of list){const row=document.createElement('button');row.className='item';row.innerHTML='<span class="emo conversation-symbol">✎</span><div class="grow"><div></div><div class="sub"></div></div><span class="arrow">›</span>';row.querySelector('.grow>div').textContent=(p.favorite?'★ ':'')+p.title;row.querySelector('.sub').textContent=p.messages.length+' 件のコメント';row.onclick=()=>{current=p.id;activeMessage=null;pageTo('chat')};row.oncontextmenu=e=>{e.preventDefault();projectMenu(p.id)};let press;row.addEventListener('touchstart',()=>press=setTimeout(()=>projectMenu(p.id),550),{passive:true});['touchend','touchcancel','touchmove'].forEach(k=>row.addEventListener(k,()=>clearTimeout(press),{passive:true}));const more=document.createElement('button');more.textContent='⋯';more.className='iconbtn';more.onclick=e=>{e.stopPropagation();projectMenu(p.id)};row.append(more);host.append(row)} }
 host.scrollTop=openFolderId?scrollBefore:0;}
 function folderMenu(id){const f=db.folders.find(x=>x.id===id);sheet('フォルダ：'+f.name,host=>{host.append(button('名前を変更',()=>{close();ask('フォルダ名',f.name,v=>mutate(()=>f.name=v))}));if(id!=='folder0')host.append(button('フォルダを削除（会話は「すべての会話」へ）',()=>{if(!confirm('このフォルダを削除しますか？\n会話は「すべての会話」に移動します。'))return;close();mutate(()=>{db.projects.filter(p=>p.folderId===id).forEach(p=>p.folderId='folder0');db.folders=db.folders.filter(x=>x.id!==id)})},true));host.append(button('閉じる',close))})}
 function newProject(){ask('新しい会話のタイトル','新しい会話',v=>{const f=openFolderId||db.folders[0].id;mutate(()=>{const p={id:uid(),folderId:f,title:v,favorite:false,messages:[]};db.projects.unshift(p);current=p.id;activeMessage=null});pageTo('chat')})}
@@ -85,14 +85,15 @@ $('deleteMsg').onclick=()=>deleteSelectedDirect();
 $('duplicateMsg').onclick=()=>onSelected(m=>{const id=m.id;saveEditing();const p=getProject(),i=p.messages.findIndex(x=>x.id===id);if(i<0)return;const copy={...clone(p.messages[i]),id:uid()};mutate(()=>p.messages.splice(i+1,0,copy));selectMessage(copy.id);});
 $('upMsg').onclick=()=>moveSelected(-1);$('downMsg').onclick=()=>moveSelected(1);
 $('sideMsg').onclick=()=>onSelected(m=>{const id=m.id;saveEditing();const msg=getProject().messages.find(x=>x.id===id);if(!msg)return;mutate(()=>msg.side=msg.side==='left'?'center':msg.side==='center'?'right':'left');beginEditing(msg);renderChat()});
-function updateEditNavigator(){const el=$('editNavigator');if(!el)return;const p=getProject(),i=p?.messages.findIndex(m=>m.id===editingMessageId)??-1;el.classList.toggle('hidden',i<0);if(i>=0){$('editPosition').textContent=(i+1)+' / '+p.messages.length;$('editPrev').disabled=i===0;$('editNext').disabled=i===p.messages.length-1}}
+function updateEditNavigator(){const el=$('editNavigator');if(!el)return;const p=getProject(),i=p?.messages.findIndex(m=>m.id===editingMessageId)??-1;el.classList.add('hidden');if(i>=0){$('editPosition').textContent=(i+1)+' / '+p.messages.length;$('editPrev').disabled=i===0;$('editNext').disabled=i===p.messages.length-1}}
 function switchEditing(delta){const p=getProject(),i=p?.messages.findIndex(m=>m.id===editingMessageId)??-1;if(i<0||i+delta<0||i+delta>=p.messages.length)return;saveEditing();selectMessage(p.messages[i+delta].id)}
-$('editPrev').onclick=()=>switchEditing(-1);$('editNext').onclick=()=>switchEditing(1);
+
 function openInlineCharacterPicker(message){sheet('このコメントのキャラクターを変更',host=>{selectableCharacters().forEach(c=>{const b=button(c.name,()=>{close();if(editingMessageId)saveEditing();mutate(()=>message.characterId=c.id)});const image=document.createElement('span');image.className='avatar';image.style.cssText='display:inline-flex;width:30px;height:30px;vertical-align:middle;margin-right:8px';setIcon(image,c);b.prepend(image);host.append(b)});host.append(button('キャンセル',close))})}
-function cancelEditing(){if(editingMessageId){const m=getProject()?.messages.find(x=>x.id===editingMessageId);if(m){const row=[...$('messages').querySelectorAll('.message')].find(el=>el.dataset.messageId===editingMessageId);if(row&&m.side!=='center'){const avatar=row.querySelector('.avatar'),name=row.querySelector('.who');if(avatar)setIcon(avatar,character(m.characterId));if(name)name.textContent=character(m.characterId).name}}}editingMessageId=null;$('entry').value='';$('entry').placeholder='メッセージを入力…';resizeEntry()}
+function cancelEditing(){$('messages').style.paddingBottom='24px';if(editingMessageId){const m=getProject()?.messages.find(x=>x.id===editingMessageId);if(m){const row=[...$('messages').querySelectorAll('.message')].find(el=>el.dataset.messageId===editingMessageId);if(row&&m.side!=='center'){const avatar=row.querySelector('.avatar'),name=row.querySelector('.who');if(avatar)setIcon(avatar,character(m.characterId));if(name)name.textContent=character(m.characterId).name}}}editingMessageId=null;$('entry').value='';$('entry').placeholder='メッセージを入力…';resizeEntry()}
 function beginEditing(m){
   activeMessage=m.id;
   editingMessageId=m.id;
+  $('messages').style.paddingBottom=Math.max(100,$('messages').clientHeight-90)+'px';
   // The picker must match the selected comment, not the last composed comment.
   if(m.side!=='center'&&selectableCharacters().some(c=>c.id===m.characterId)){selectedSpeaker=m.characterId;renderAvatarStrip()}
   $('entry').value=m.text;
@@ -132,37 +133,53 @@ function selectMessage(id){
   updateEditNavigator();
   resizeEntry();
   // Wait until the toolbar has changed the message viewport before measuring.
-  requestAnimationFrame(()=>requestAnimationFrame(()=>ensureSelectedVisible(id)));
+  requestAnimationFrame(()=>requestAnimationFrame(()=>ensureSelectedVisible(id,true)));
 }
 // Keep selected message above the editing toolbar, without jumping when already visible.
-function ensureSelectedVisible(id=activeMessage){
-  if(!id||page!=='chat')return;
-  const host=$('messages');
-  const row=[...host.querySelectorAll('.message')].find(n=>n.dataset.messageId===id);
-  if(!row)return;
-  const viewport=host.getBoundingClientRect(),rect=row.getBoundingClientRect();
-  const margin=12;
-  if(rect.bottom>viewport.bottom-margin){
-    host.scrollTop+=rect.bottom-(viewport.bottom-margin);
-  }else if(rect.top<viewport.top+margin){
-    host.scrollTop-=viewport.top+margin-rect.top;
-  }
+function ensureSelectedVisible(id=activeMessage,force=false){
+ if(!id||page!=='chat')return;
+ const host=$('messages');const row=[...host.querySelectorAll('.message')].find(n=>n.dataset.messageId===id);
+ if(!row)return;
+ const viewport=host.getBoundingClientRect(),rect=row.getBoundingClientRect();
+ const footerGap=20;
+ // Place the editing comment just above the footer, without scrolling beyond the content.
+ const targetBottom=viewport.bottom-footerGap;
+ const delta=rect.bottom-targetBottom;
+ if(force||Math.abs(delta)>8)host.scrollTop+=delta;
 }
-$('doneMsg').onclick=()=>{saveEditing();$('entry').blur()};$('clearTextMsg').onclick=()=>{if(!editingMessageId)return;$('entry').value='';resizeEntry();previewEditingText();$('entry').focus({preventScroll:true})};
+
+
+function completeEditing(){
+ const p=getProject();const i=p?.messages.findIndex(m=>m.id===editingMessageId)??-1;
+ const nextId=db.settings.autoNextEdit&&i>=0?p.messages[i+1]?.id:null;
+ saveEditing();
+ if(nextId&&getProject()?.messages.some(m=>m.id===nextId)){
+   selectMessage(nextId);
+   $('entry').focus({preventScroll:true});
+   requestAnimationFrame(()=>requestAnimationFrame(()=>ensureSelectedVisible(nextId,true)));
+ }else $('entry').blur();
+}
+function openAutoNextSetting(){sheet('連続編集の設定',host=>{
+ const label=document.createElement('label');label.style.cssText='display:flex;align-items:center;gap:12px;padding:14px 4px';
+ const check=document.createElement('input');check.type='checkbox';check.checked=!!db.settings.autoNextEdit;
+ const text=document.createElement('span');text.textContent='編集完了後、次のコメントを自動編集';
+ check.onchange=()=>{db.settings.autoNextEdit=check.checked;persist()};label.append(check,text);host.append(label,button('閉じる',close));
+})}
+$('doneMsg').onclick=()=>completeEditing();$('clearTextMsg').onclick=()=>{if(!editingMessageId)return;$('entry').value='';resizeEntry();previewEditingText();$('entry').focus({preventScroll:true})};
 $('speaker').onchange=()=>{selectedSpeaker=$('speaker').value;renderAvatarStrip();renderSpeakerPicker()};
 $('speakerPicker').onclick=()=>{iconChooserOpen=!iconChooserOpen;renderAvatarStrip()};
 let speakerTouchX=null;
 $('speakerPicker').addEventListener('touchstart',e=>{speakerTouchX=e.touches[0]?.clientX??null},{passive:true});
 $('speakerPicker').addEventListener('touchend',e=>{if(speakerTouchX===null)return;const dx=(e.changedTouches[0]?.clientX??speakerTouchX)-speakerTouchX;speakerTouchX=null;if(Math.abs(dx)<24)return;e.preventDefault();e.stopPropagation();const chars=selectableCharacters();if(!chars.length)return;const i=chars.findIndex(c=>c.id===selectedSpeaker);const next=chars[(i+(dx<0?1:-1)+chars.length)%chars.length];selectedSpeaker=next.id;renderSpeakerPicker();renderAvatarStrip();if(editingMessageId)previewEditingSpeaker()},{passive:false});
 
-function renderChat(){const p=getProject();if(!p)return;updateChatSummary();const host=$('messages');host.style.background=db.settings.bg||'#a9cff0';host.style.gap=db.settings.gap+'px';host.style.setProperty('--msg-size',db.settings.font+'px');const scrollBefore=host.scrollTop;host.replaceChildren();const sel=$('speaker'),old=sel.value;sel.replaceChildren();selectableCharacters().forEach(c=>{const op=document.createElement('option');op.value=c.id;op.textContent=c.icon+' '+c.name;sel.append(op)});if(selectableCharacters().some(c=>c.id===old))sel.value=old; if(selectedSpeaker&&selectableCharacters().some(c=>c.id===selectedSpeaker))sel.value=selectedSpeaker;renderAvatarStrip();for(const m of p.messages){const c=character(m.characterId),row=document.createElement('div');const side=((m.side||c.side)==='right'?'right':m.side==='center'?'center':'left');row.className='message '+(side==='left'?'':side);row.dataset.messageId=m.id;const av=document.createElement('div');av.className='avatar';setIcon(av,c);const meta=document.createElement('div');meta.className='msgcontent';const name=document.createElement('div');name.className='who';name.textContent=c.name;name.style.fontSize=(db.settings.nameSize??14)+'px';name.hidden=db.settings.showNames===false||m.side==='center';const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.text;if(m.side==='center'){bubble.style.fontSize=(db.settings.narratorSize||14)+'px';bubble.style.fontWeight=db.settings.narratorBold?'700':'400'}meta.append(name,bubble);if(m.side==='center'){av.remove();row.append(meta)}else row.append(av,meta);row.classList.toggle('selected',activeMessage===m.id);const activate=()=>{if(bulkMode){toggleBulk(m.id);return}selectMessage(m.id)};
- bubble.addEventListener('click',activate);
+function renderChat(){const p=getProject();if(!p)return;updateChatSummary();const host=$('messages');host.style.background=db.settings.bg||'#a9cff0';host.style.paddingBottom=editingMessageId?Math.max(100,host.clientHeight-90)+'px':'24px';host.style.gap=db.settings.gap+'px';host.style.setProperty('--msg-size',db.settings.font+'px');const scrollBefore=host.scrollTop;host.replaceChildren();const sel=$('speaker'),old=sel.value;sel.replaceChildren();selectableCharacters().forEach(c=>{const op=document.createElement('option');op.value=c.id;op.textContent=c.icon+' '+c.name;sel.append(op)});if(selectableCharacters().some(c=>c.id===old))sel.value=old; if(selectedSpeaker&&selectableCharacters().some(c=>c.id===selectedSpeaker))sel.value=selectedSpeaker;renderAvatarStrip();for(const m of p.messages){const c=character(m.characterId),row=document.createElement('div');const side=((m.side||c.side)==='right'?'right':m.side==='center'?'center':'left');row.className='message '+(side==='left'?'':side);row.dataset.messageId=m.id;const av=document.createElement('div');av.className='avatar';setIcon(av,c);const meta=document.createElement('div');meta.className='msgcontent';const name=document.createElement('div');name.className='who';name.textContent=c.name;name.style.fontSize=(db.settings.nameSize??14)+'px';name.hidden=db.settings.showNames===false||m.side==='center';const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.text;if(m.side==='center'){bubble.style.fontSize=(db.settings.narratorSize||14)+'px';bubble.style.fontWeight=db.settings.narratorBold?'700':'400'}meta.append(name,bubble);if(m.side==='center'){av.remove();row.append(meta)}else row.append(av,meta);row.classList.toggle('selected',activeMessage===m.id);const activate=()=>{if(bulkMode){toggleBulk(m.id);return}selectMessage(m.id)};
+ bubble.addEventListener('click',e=>{if(Date.now()<chatDragIgnoreClicksUntil){e.preventDefault();e.stopPropagation();return}activate()});
  if(m.side==='center'){/* narrator body is clickable */}
- else{av.addEventListener('click',e=>{e.stopPropagation();openInlineCharacterPicker(m)});}
+ else{av.addEventListener('click',e=>{e.stopPropagation();if(Date.now()>=chatDragIgnoreClicksUntil)activate()});}
  let swipeX=0,swipeY=0,swipeStamp=0,swiped=false;
  bubble.addEventListener('touchstart',e=>{if(!e.touches.length)return;swipeX=e.touches[0].clientX;swipeY=e.touches[0].clientY;swipeStamp=Date.now();swiped=false},{passive:true});
  bubble.addEventListener('touchend',e=>{const touch=e.changedTouches[0];if(!touch)return;const dx=touch.clientX-swipeX,dy=touch.clientY-swipeY;if(Math.abs(dx)>65&&Math.abs(dx)>Math.abs(dy)*1.6&&Date.now()-swipeStamp<1000&&m.side!=='center'){swiped=true;if(editingMessageId)saveEditing();mutate(()=>m.side=dx>0?'right':'left');setTimeout(()=>swiped=false,350)}},{passive:true});
- bubble.addEventListener('click',e=>{if(swiped){e.stopImmediatePropagation();e.preventDefault()}},true);let timer;row.addEventListener('touchstart',()=>timer=setTimeout(()=>{if(!bulkMode)startBulk();toggleBulk(m.id)},550),{passive:true});['touchend','touchmove','touchcancel'].forEach(ev=>row.addEventListener(ev,()=>clearTimeout(timer),{passive:true}));host.append(row);if(bulkSelected.has(m.id))row.classList.add('bulk-selected')}$('messageTools').classList.toggle('show',!!activeMessage&&!bulkMode);updateEditNavigator();host.scrollTop=scrollBefore;applySearchHighlights();if(activeMessage)requestAnimationFrame(()=>requestAnimationFrame(()=>ensureSelectedVisible()));}
+ bubble.addEventListener('click',e=>{if(swiped){e.stopImmediatePropagation();e.preventDefault()}},true);host.append(row);attachChatLongDrag(row,host);if(bulkSelected.has(m.id))row.classList.add('bulk-selected')}$('messageTools').classList.toggle('show',!!activeMessage&&!bulkMode);updateEditNavigator();host.scrollTop=scrollBefore;applySearchHighlights();if(activeMessage)requestAnimationFrame(()=>requestAnimationFrame(()=>ensureSelectedVisible()));}
 document.addEventListener('pointerdown',e=>{
  if(page!=='chat'||!editingMessageId||bulkMode||$('shade').classList.contains('open'))return;
  if(e.target.closest('#messageTools,#entry,#composer,#composerHelpers,#avatarStrip,#speakerPicker,#chatSearchPanel,.message,.bar,.tabs'))return;
@@ -298,7 +315,14 @@ function openTextImport(){const p=getProject();if(!p)return;sheet('テキスト�
 function openProjectTextExport(p){current=p.id;openTextExport()}
 function openTextExport(){const p=getProject();if(!p)return;sheet('会話テキストを書き出す',host=>{const area=document.createElement('textarea');area.className='import-area';area.value=exportConversationText(p);host.append(area,button('テキストをコピー',async()=>{try{await navigator.clipboard.writeText(area.value);alert('コピーしました')}catch{area.select();document.execCommand('copy')}}),button('TXTファイルを保存',()=>downloadText(p)))})}
 
-$('exportJson').onclick=()=>{download('hitori-backup-'+new Date().toISOString().slice(0,10)+'.json',new Blob([JSON.stringify(db,null,2)],{type:'application/json'}));try{localStorage.setItem('hitori-last-backup',String(Date.now()))}catch{}};$('importJson').onclick=()=>$('importFile').click();$('importFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());if(!Array.isArray(data.projects)||!Array.isArray(data.characters)||!Array.isArray(data.folders)||!data.settings)throw Error();if(!confirm('現在のデータをバックアップで置き換えますか？'))return;mutate(()=>db=data);pageTo('home')}catch{alert('バックアップファイルが正しくありません')}e.target.value=''};
+let backupSequence=0;let lastBackupStamp='';
+function backupFilename(){
+ const now=new Date(),pad=n=>String(n).padStart(2,'0');
+ const stamp=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+ if(stamp===lastBackupStamp)backupSequence++;else{lastBackupStamp=stamp;backupSequence=0}
+ return 'talkraft_backup_'+stamp+(backupSequence?'-'+backupSequence:'')+'.json';
+}
+$('exportJson').onclick=()=>{download(backupFilename(),new Blob([JSON.stringify(db,null,2)],{type:'application/json'}));try{localStorage.setItem('hitori-last-backup',String(Date.now()))}catch{}};$('importJson').onclick=()=>$('importFile').click();$('importFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());if(!Array.isArray(data.projects)||!Array.isArray(data.characters)||!Array.isArray(data.folders)||!data.settings)throw Error();if(!confirm('現在のデータをバックアップで置き換えますか？'))return;mutate(()=>db=data);pageTo('home')}catch{alert('バックアップファイルが正しくありません')}e.target.value=''};
 function updateUndoControls(){
  const u=$('helperUndo'),r=$('helperRedo');
  if(u)u.disabled=history.length===0;
@@ -308,15 +332,63 @@ function undoAction(){const last=history.pop();if(!last)return;redoStack.push(JS
 function redoAction(){const next=redoStack.pop();if(!next)return;history.push(JSON.stringify(db));applySnapshot(JSON.parse(next))}
 $('undo').onclick=undoAction;$('redo').onclick=redoAction;
 $('helperUndo').onclick=undoAction;$('helperRedo').onclick=redoAction;
-$('helperPhrases').onclick=()=>showQuickPanel('phrases');
+
 $('helperScript').onclick=()=>showQuickPanel('script');
 // Reuse the validated existing newline insertion handler, including cursor preservation.
 $('helperNewline').addEventListener('pointerdown',e=>e.preventDefault());
 $('helperNewline').onclick=e=>{$('newline').click()};
 updateUndoControls();
 $('newFolder').onclick=()=>ask('新しいフォルダ名','新しいフォルダ',v=>{mutate(()=>db.folders.push({id:uid(),name:v}));});$('folderBack').onclick=()=>{openFolderId=null;$('search').value='';renderHome()};$('topAdd').onclick=()=>{if(page==='chat')pageTo('video');else if(page==='home')sheet('新規作成',host=>host.append(button('会話を作成',()=>{close();newProject()}),button('フォルダを作成',()=>{close();$('newFolder').click()})));else newProject()};$('search').oninput=renderHome;$('back').onclick=()=>pageTo(page==='video'?'chat':'home');document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>pageTo(b.dataset.page));$('shade').addEventListener('keydown',e=>{if(e.key==='Escape')close()});
-function finishEdit(){cancelEditing();$('editNavigator').classList.add('hidden');activeMessage=null;$('messageTools').classList.remove('show');document.querySelectorAll('#messages .selected').forEach(n=>n.classList.remove('selected'))}
+function finishEdit(){$('messages').style.paddingBottom='24px';cancelEditing();$('editNavigator').classList.add('hidden');activeMessage=null;$('messageTools').classList.remove('show');document.querySelectorAll('#messages .selected').forEach(n=>n.classList.remove('selected'))}
 function resizeEntry(){const el=$('entry');el.style.height='auto';el.style.height=Math.min(120,el.scrollHeight)+'px'}
+
+let chatDragIgnoreClicksUntil=0;
+function attachChatLongDrag(row,host){
+ let pending=null,drag=null;
+ function clearPending(){if(pending){clearTimeout(pending.timer);pending=null}}
+ row.addEventListener('touchstart',e=>{
+  if(bulkMode||e.touches.length!==1)return;
+  const t=e.touches[0],x=t.clientX,y=t.clientY;
+  clearPending();
+  const timer=setTimeout(()=>{
+   if(!pending)return;
+   const bounds=row.getBoundingClientRect();const ghost=row.cloneNode(true);
+   ghost.classList.add('chat-drag-ghost');
+   Object.assign(ghost.style,{position:'fixed',left:bounds.left+'px',top:bounds.top+'px',width:bounds.width+'px',zIndex:10000,pointerEvents:'none',margin:0});
+   document.body.append(ghost);row.classList.add('chat-drag-placeholder');
+   drag={row,ghost,offsetY:y-bounds.top,offsetX:x-bounds.left,oldIds:[...host.querySelectorAll('.message')].map(e=>e.dataset.messageId)};
+   chatDragIgnoreClicksUntil=Date.now()+900; clearPending();
+   if(navigator.vibrate)navigator.vibrate(15);
+  },380);
+  pending={x,y,timer};
+ },{passive:true});
+ row.addEventListener('touchmove',e=>{
+  const t=e.touches[0];if(!t)return;
+  if(pending&&Math.hypot(t.clientX-pending.x,t.clientY-pending.y)>9)clearPending();
+  if(!drag)return;
+  e.preventDefault();chatDragIgnoreClicksUntil=Date.now()+900;
+  drag.ghost.style.top=(t.clientY-drag.offsetY)+'px';
+  const bounds=host.getBoundingClientRect();
+  if(t.clientY>bounds.bottom-35)host.scrollTop+=14;else if(t.clientY<bounds.top+35)host.scrollTop-=14;
+  const others=[...host.querySelectorAll('.message')].filter(n=>n!==row);
+  const target=others.find(n=>{const b=n.getBoundingClientRect();return t.clientY>=b.top&&t.clientY<=b.bottom});
+  if(target){const b=target.getBoundingClientRect(),before=recordRectsForList(host,'.message','messageId');
+   if(t.clientY<b.top+b.height/2)host.insertBefore(row,target);else host.insertBefore(row,target.nextSibling);
+   animateListReflow(host,'.message','messageId',before,row);
+  }
+ },{passive:false});
+ function end(cancel){clearPending();if(!drag)return;const currentDrag=drag;drag=null;
+  currentDrag.ghost.remove();row.classList.remove('chat-drag-placeholder');chatDragIgnoreClicksUntil=Date.now()+700;
+  const ids=cancel?currentDrag.oldIds:[...host.querySelectorAll('.message')].map(e=>e.dataset.messageId);
+  if(cancel){const rows=new Map([...host.querySelectorAll('.message')].map(e=>[e.dataset.messageId,e]));ids.forEach(id=>host.append(rows.get(id)));return}
+  if(ids.join('|')!==currentDrag.oldIds.join('|')){
+   if(editingMessageId)saveEditing();
+   const p=getProject();if(p)mutate(()=>{const mapping=new Map(p.messages.map(m=>[m.id,m]));p.messages=ids.map(id=>mapping.get(id)).filter(Boolean)});
+  }
+ }
+ row.addEventListener('touchend',()=>end(false),{passive:true});row.addEventListener('touchcancel',()=>end(true),{passive:true});
+}
+
 function nextCommentSide(messages, speakerId){
   const previous=[...messages].reverse().find(m=>m.side!=='center'&&m.characterId);
   if(!previous)return 'left';
@@ -325,7 +397,7 @@ function nextCommentSide(messages, speakerId){
 }
 let lastPostedId=null;
 function sendEntry(){const p=getProject(),input=$('entry'),value=input.value.trim();if(!p)return;if(editingMessageId&&!value){deleteSelectedDirect();return}if(!value)return;
-if(editingMessageId){saveEditing();input.blur();return}
+if(editingMessageId){completeEditing();return}
 const who=selectedSpeaker||$('speaker').value||selectableCharacters()[0]?.id;if(!who)return alert('先にキャラクターを登録してください');const message={id:uid(),characterId:who,side:nextCommentSide(p.messages,who),text:value};mutate(()=>p.messages.push(message));lastPostedId=message.id;input.value='';activeMessage=null;iconChooserOpen=false;resizeEntry();renderChat();requestAnimationFrame(()=>{$('messages').scrollTop=$('messages').scrollHeight})}
 $('nameSize').onchange=e=>{db.settings.nameSize=Number(e.target.value);persist();renderSettings();if(page==='chat')renderChat();if(page==='video'&&!playing)drawVideo(9999)};$('showNames').onchange=e=>{db.settings.showNames=e.target.checked;persist();renderSettings();if(page==='chat')renderChat();if(page==='video'&&!playing)drawVideo(9999)};
 $('entry').addEventListener('input',()=>{resizeEntry();previewEditingText()});$('entry').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229){e.preventDefault();sendEntry()}});let caretStart=0,caretEnd=0;
@@ -395,7 +467,9 @@ function openChatOperations(){
   host.append(button('☰ コメントの並べ替え',()=>{close();dragList()}));
   host.append(button('☑ コメントの複数選択',()=>{close();startBulk()}));
   host.append(button('↔ キャラごとのコメント位置',()=>{close();openCharacterSideSettings()}));
-  host.append(button('💬 定型文・よく使うセリフ',()=>{close();showQuickPanel('phrases')}));
+
+  host.append(button('⚙ 次のコメントを自動編集：'+(db.settings.autoNextEdit?'ON':'OFF'),()=>{close();openAutoNextSetting()}));
+  host.append(button('📁 フォルダへ移動',()=>{close();const p=getProject();if(p)chooseFolder(p)}));
   host.append(button('▤ 簡易台本モード',()=>{close();showQuickPanel('script')}));
   host.append(button('↶ 直前の投稿を取り消す',()=>{close();undoRecentPost()}));
   host.append(button('閉じる',close));

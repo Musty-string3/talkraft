@@ -16,3 +16,5 @@ iOSのキーボード上にOSが表示する入力補助バーについては、
 更新する前に、現行版の完全JSONバックアップを保存してください。
 保存データ形式は変更していません。ブラウザーとホーム画面PWAのデータは別々の場合があります。
 JavaScript構文と配布ファイルの整合性を確認済みですが、iPhone実機の確認は未実施です。
+
+Version 28: backup local timestamp; chat long-press reorder; composer avatar edits speaker; auto-next editing toggle; selected comment anchored above footer; phrase shortcut removed; previous/next navigation hidden; folder move via chat menu.
