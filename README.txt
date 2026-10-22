@@ -18,3 +18,9 @@ iOSのキーボード上にOSが表示する入力補助バーについては、
 JavaScript構文と配布ファイルの整合性を確認済みですが、iPhone実機の確認は未実施です。
 
 Version 28: backup local timestamp; chat long-press reorder; composer avatar edits speaker; auto-next editing toggle; selected comment anchored above footer; phrase shortcut removed; previous/next navigation hidden; folder move via chat menu.
+
+Version 29: Prevent native selection and copy callouts on displayed chat comments to enable long-press drag; editing input remains selectable.
+
+Version 30: Selecting a comment no longer auto-scrolls. Once the on-screen keyboard opens (visualViewport shrinks), the edited comment is aligned just above the footer. Keyboard close does not auto-scroll.
+
+Version 31: iOS keyboard-triggered smooth scrolling to selected edit comment.

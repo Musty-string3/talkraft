@@ -93,7 +93,8 @@ function cancelEditing(){$('messages').style.paddingBottom='24px';if(editingMess
 function beginEditing(m){
   activeMessage=m.id;
   editingMessageId=m.id;
-  $('messages').style.paddingBottom=Math.max(100,$('messages').clientHeight-90)+'px';
+  // Do not move the conversation until the keyboard actually opens.
+  $('messages').style.paddingBottom='24px';
   // The picker must match the selected comment, not the last composed comment.
   if(m.side!=='center'&&selectableCharacters().some(c=>c.id===m.characterId)){selectedSpeaker=m.characterId;renderAvatarStrip()}
   $('entry').value=m.text;
@@ -132,20 +133,68 @@ function selectMessage(id){
   $('messageTools').classList.add('show');
   updateEditNavigator();
   resizeEntry();
-  // Wait until the toolbar has changed the message viewport before measuring.
-  requestAnimationFrame(()=>requestAnimationFrame(()=>ensureSelectedVisible(id,true)));
+  // Entering edit mode alone must retain the scroll position.
+  scheduleKeyboardAnchor();
 }
-// Keep selected message above the editing toolbar, without jumping when already visible.
+// Only anchor after the on-screen keyboard has reduced the visible viewport.
+// Listening to visualViewport.resize covers delayed iOS Safari keyboard animations.
+const visualView=window.visualViewport;
+let restingViewportHeight=visualView?.height||window.innerHeight;
+let anchorRaf=0, anchorTimer=0;
+function keyboardShowing(){
+  if(document.activeElement!==$('entry')||!editingMessageId)return false;
+  if(!visualView)return false;
+  return restingViewportHeight-visualView.height>110;
+}
+function scheduleKeyboardAnchor(){
+  cancelAnimationFrame(anchorRaf);
+  clearTimeout(anchorTimer);
+  if(!keyboardShowing())return;
+  // The iOS keyboard changes viewport size over multiple frames. Wait until the
+  // geometry settles; then animate the conversation instead of jumping it.
+  anchorTimer=setTimeout(()=>{
+    anchorRaf=requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      if(!keyboardShowing())return;
+      const host=$('messages');
+      const prior=host.scrollTop;
+      host.style.paddingBottom=Math.max(100,host.clientHeight-90)+'px';
+      host.scrollTop=prior;
+      ensureSelectedVisible(editingMessageId,true);
+    }));
+  },140);
+}
+function viewportKeyboardChanged(){
+  if(!visualView)return;
+  if(document.activeElement!==$('entry')){
+    restingViewportHeight=visualView.height;
+    return;
+  }
+  if(keyboardShowing()){
+    scheduleKeyboardAnchor();
+  }
+}
+visualView?.addEventListener('resize',viewportKeyboardChanged);
+$('entry').addEventListener('focus',()=>{if(keyboardShowing())scheduleKeyboardAnchor()});
+$('entry').addEventListener('blur',()=>{
+  cancelAnimationFrame(anchorRaf);
+  clearTimeout(anchorTimer);
+  $('messages').style.paddingBottom='24px';
+  setTimeout(()=>{if(document.activeElement!==$('entry'))restingViewportHeight=visualView?.height||window.innerHeight},400);
+});
+// Only after the keyboard opens: smoothly bring the selected comment to just
+// above the editing footer. Never change the comment's actual order/side.
 function ensureSelectedVisible(id=activeMessage,force=false){
  if(!id||page!=='chat')return;
  const host=$('messages');const row=[...host.querySelectorAll('.message')].find(n=>n.dataset.messageId===id);
  if(!row)return;
  const viewport=host.getBoundingClientRect(),rect=row.getBoundingClientRect();
- const footerGap=20;
- // Place the editing comment just above the footer, without scrolling beyond the content.
- const targetBottom=viewport.bottom-footerGap;
+ const targetBottom=viewport.bottom-20;
  const delta=rect.bottom-targetBottom;
- if(force||Math.abs(delta)>8)host.scrollTop+=delta;
+ if(force||Math.abs(delta)>8){
+   const maxScroll=Math.max(0,host.scrollHeight-host.clientHeight);
+   const target=Math.min(maxScroll,Math.max(0,host.scrollTop+delta));
+   if(Math.abs(target-host.scrollTop)>2)host.scrollTo({top:target,behavior:'smooth'});
+ }
 }
 
 
@@ -156,7 +205,7 @@ function completeEditing(){
  if(nextId&&getProject()?.messages.some(m=>m.id===nextId)){
    selectMessage(nextId);
    $('entry').focus({preventScroll:true});
-   requestAnimationFrame(()=>requestAnimationFrame(()=>ensureSelectedVisible(nextId,true)));
+   scheduleKeyboardAnchor();
  }else $('entry').blur();
 }
 function openAutoNextSetting(){sheet('連続編集の設定',host=>{
@@ -172,14 +221,14 @@ let speakerTouchX=null;
 $('speakerPicker').addEventListener('touchstart',e=>{speakerTouchX=e.touches[0]?.clientX??null},{passive:true});
 $('speakerPicker').addEventListener('touchend',e=>{if(speakerTouchX===null)return;const dx=(e.changedTouches[0]?.clientX??speakerTouchX)-speakerTouchX;speakerTouchX=null;if(Math.abs(dx)<24)return;e.preventDefault();e.stopPropagation();const chars=selectableCharacters();if(!chars.length)return;const i=chars.findIndex(c=>c.id===selectedSpeaker);const next=chars[(i+(dx<0?1:-1)+chars.length)%chars.length];selectedSpeaker=next.id;renderSpeakerPicker();renderAvatarStrip();if(editingMessageId)previewEditingSpeaker()},{passive:false});
 
-function renderChat(){const p=getProject();if(!p)return;updateChatSummary();const host=$('messages');host.style.background=db.settings.bg||'#a9cff0';host.style.paddingBottom=editingMessageId?Math.max(100,host.clientHeight-90)+'px':'24px';host.style.gap=db.settings.gap+'px';host.style.setProperty('--msg-size',db.settings.font+'px');const scrollBefore=host.scrollTop;host.replaceChildren();const sel=$('speaker'),old=sel.value;sel.replaceChildren();selectableCharacters().forEach(c=>{const op=document.createElement('option');op.value=c.id;op.textContent=c.icon+' '+c.name;sel.append(op)});if(selectableCharacters().some(c=>c.id===old))sel.value=old; if(selectedSpeaker&&selectableCharacters().some(c=>c.id===selectedSpeaker))sel.value=selectedSpeaker;renderAvatarStrip();for(const m of p.messages){const c=character(m.characterId),row=document.createElement('div');const side=((m.side||c.side)==='right'?'right':m.side==='center'?'center':'left');row.className='message '+(side==='left'?'':side);row.dataset.messageId=m.id;const av=document.createElement('div');av.className='avatar';setIcon(av,c);const meta=document.createElement('div');meta.className='msgcontent';const name=document.createElement('div');name.className='who';name.textContent=c.name;name.style.fontSize=(db.settings.nameSize??14)+'px';name.hidden=db.settings.showNames===false||m.side==='center';const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.text;if(m.side==='center'){bubble.style.fontSize=(db.settings.narratorSize||14)+'px';bubble.style.fontWeight=db.settings.narratorBold?'700':'400'}meta.append(name,bubble);if(m.side==='center'){av.remove();row.append(meta)}else row.append(av,meta);row.classList.toggle('selected',activeMessage===m.id);const activate=()=>{if(bulkMode){toggleBulk(m.id);return}selectMessage(m.id)};
+function renderChat(){const p=getProject();if(!p)return;updateChatSummary();const host=$('messages');host.style.background=db.settings.bg||'#a9cff0';host.style.paddingBottom=editingMessageId&&keyboardShowing()?Math.max(100,host.clientHeight-90)+'px':'24px';host.style.gap=db.settings.gap+'px';host.style.setProperty('--msg-size',db.settings.font+'px');const scrollBefore=host.scrollTop;host.replaceChildren();const sel=$('speaker'),old=sel.value;sel.replaceChildren();selectableCharacters().forEach(c=>{const op=document.createElement('option');op.value=c.id;op.textContent=c.icon+' '+c.name;sel.append(op)});if(selectableCharacters().some(c=>c.id===old))sel.value=old; if(selectedSpeaker&&selectableCharacters().some(c=>c.id===selectedSpeaker))sel.value=selectedSpeaker;renderAvatarStrip();for(const m of p.messages){const c=character(m.characterId),row=document.createElement('div');const side=((m.side||c.side)==='right'?'right':m.side==='center'?'center':'left');row.className='message '+(side==='left'?'':side);row.dataset.messageId=m.id;const av=document.createElement('div');av.className='avatar';setIcon(av,c);const meta=document.createElement('div');meta.className='msgcontent';const name=document.createElement('div');name.className='who';name.textContent=c.name;name.style.fontSize=(db.settings.nameSize??14)+'px';name.hidden=db.settings.showNames===false||m.side==='center';const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.text;if(m.side==='center'){bubble.style.fontSize=(db.settings.narratorSize||14)+'px';bubble.style.fontWeight=db.settings.narratorBold?'700':'400'}meta.append(name,bubble);if(m.side==='center'){av.remove();row.append(meta)}else row.append(av,meta);row.classList.toggle('selected',activeMessage===m.id);const activate=()=>{if(bulkMode){toggleBulk(m.id);return}selectMessage(m.id)};
  bubble.addEventListener('click',e=>{if(Date.now()<chatDragIgnoreClicksUntil){e.preventDefault();e.stopPropagation();return}activate()});
  if(m.side==='center'){/* narrator body is clickable */}
  else{av.addEventListener('click',e=>{e.stopPropagation();if(Date.now()>=chatDragIgnoreClicksUntil)activate()});}
  let swipeX=0,swipeY=0,swipeStamp=0,swiped=false;
  bubble.addEventListener('touchstart',e=>{if(!e.touches.length)return;swipeX=e.touches[0].clientX;swipeY=e.touches[0].clientY;swipeStamp=Date.now();swiped=false},{passive:true});
  bubble.addEventListener('touchend',e=>{const touch=e.changedTouches[0];if(!touch)return;const dx=touch.clientX-swipeX,dy=touch.clientY-swipeY;if(Math.abs(dx)>65&&Math.abs(dx)>Math.abs(dy)*1.6&&Date.now()-swipeStamp<1000&&m.side!=='center'){swiped=true;if(editingMessageId)saveEditing();mutate(()=>m.side=dx>0?'right':'left');setTimeout(()=>swiped=false,350)}},{passive:true});
- bubble.addEventListener('click',e=>{if(swiped){e.stopImmediatePropagation();e.preventDefault()}},true);host.append(row);attachChatLongDrag(row,host);if(bulkSelected.has(m.id))row.classList.add('bulk-selected')}$('messageTools').classList.toggle('show',!!activeMessage&&!bulkMode);updateEditNavigator();host.scrollTop=scrollBefore;applySearchHighlights();if(activeMessage)requestAnimationFrame(()=>requestAnimationFrame(()=>ensureSelectedVisible()));}
+ bubble.addEventListener('click',e=>{if(swiped){e.stopImmediatePropagation();e.preventDefault()}},true);host.append(row);attachChatLongDrag(row,host);if(bulkSelected.has(m.id))row.classList.add('bulk-selected')}$('messageTools').classList.toggle('show',!!activeMessage&&!bulkMode);updateEditNavigator();host.scrollTop=scrollBefore;applySearchHighlights();if(editingMessageId)scheduleKeyboardAnchor();}
 document.addEventListener('pointerdown',e=>{
  if(page!=='chat'||!editingMessageId||bulkMode||$('shade').classList.contains('open'))return;
  if(e.target.closest('#messageTools,#entry,#composer,#composerHelpers,#avatarStrip,#speakerPicker,#chatSearchPanel,.message,.bar,.tabs'))return;
@@ -344,6 +393,8 @@ function resizeEntry(){const el=$('entry');el.style.height='auto';el.style.heigh
 
 let chatDragIgnoreClicksUntil=0;
 function attachChatLongDrag(row,host){
+ // iOS long-press must begin dragging, not open the native text-selection menu.
+ row.addEventListener('contextmenu',e=>e.preventDefault());
  let pending=null,drag=null;
  function clearPending(){if(pending){clearTimeout(pending.timer);pending=null}}
  row.addEventListener('touchstart',e=>{
