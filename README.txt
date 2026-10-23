@@ -1,26 +1,24 @@
-トークラフト v26 - 操作性・会話作成支援アップデート
+トークラフト v32 — v31からの更新
 
 主な変更:
-- コメント改行ボタン: フォーカスを維持してカーソル位置に改行を挿入
-- 編集中の前後コメント移動ナビゲーション、複製後は複製先を編集
-- コメントは吹き出しのタップで編集、アイコンのタップで発言者変更
-- 左右スワイプで通常コメントの表示位置を変更（ナレーターは中央）
-- 発言者のアイコンを左右にスワイプしてキャラ切り替え（入力欄幅は維持）
-- 新規投稿はEnterで送信して入力を継続、編集確定はEnterでキーボードを閉じる
-- 定型文登録・挿入、簡易台本入力、直前の投稿取り消しを右上の「⋯」から操作
-- 一括読み込みの未登録キャラを、行番号つき色表示で確認
-- 一括読み込みなどの入力欄ズーム対策、コメントのアイコン枠線を撤去
-- ナレーターの上下余白を少し追加、文字サイズ設定を選択式に変更
+- ヘッダー位置の余裕を増やし、保存状態ラベルの出現で画面が動かない配置へ
+- pxの重複ラベル削除、会話・フォルダ作成時は空欄＋placeholder
+- 会話一覧に登場キャラ数、作成日時、更新日時（新規の会話から記録）を表示
+- 各会話のメニューに登場キャラクターのアイコン／名前を表示
+- 会話カードの見た目の変更、画面端のスワイプで会話一覧へ戻る操作
+- 台本ショートカットと台本メニューの撤去
+- 改行ボタンを入力補助バーの右側へ移動
+- 選択コメントの枠を細く、ナレーター選択時に本アイコン
+- 上下移動と左右配置変更のアニメーション、および見切れ直前の追跡スクロール
+- Undo／Redoの固定寸法SVGアイコン・操作時の半透明中央フィードバック
+- 画像選択後にドラッグ／ピンチ／スライダーで円形切り抜き。保存済みアイコンの再調整
+- 動画プレビューを拡大、コメント描画の吹き出し・アイコンの大きさを調整
+- 動画プレビューの10秒戻る／進む、中央フィードバック
+- 動画プレビューで簡易的な文章の重複／空欄チェック
 
-iOSのキーボード上にOSが表示する入力補助バーについては、PWA側からの完全な非表示を保証できません。
-更新する前に、現行版の完全JSONバックアップを保存してください。
-保存データ形式は変更していません。ブラウザーとホーム画面PWAのデータは別々の場合があります。
-JavaScript構文と配布ファイルの整合性を確認済みですが、iPhone実機の確認は未実施です。
-
-Version 28: backup local timestamp; chat long-press reorder; composer avatar edits speaker; auto-next editing toggle; selected comment anchored above footer; phrase shortcut removed; previous/next navigation hidden; folder move via chat menu.
-
-Version 29: Prevent native selection and copy callouts on displayed chat comments to enable long-press drag; editing input remains selectable.
-
-Version 30: Selecting a comment no longer auto-scrolls. Once the on-screen keyboard opens (visualViewport shrinks), the edited comment is aligned just above the footer. Keyboard close does not auto-scroll.
-
-Version 31: iOS keyboard-triggered smooth scrolling to selected edit comment.
+注意:
+- 動画プレビューはCanvas方式のまま。会話画面のDOMと完全同一レンダリングではありません。
+- 過去の会話について当時の作成日時が保存されていない場合は「日時未記録」と表示します。
+- 文章チェックは簡易ヒューリスティックで、日本語の誤字脱字を網羅するものではありません。
+- キーボード・iOS PWA・動画ファイル出力の実機テストは未実施です。
+- 更新前に完全JSONバックアップを取ってください。従来のデータ形式・IndexedDBのストアは保持します。
