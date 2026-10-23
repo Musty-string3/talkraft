@@ -82,7 +82,17 @@ function selectedIndex(){return getProject()?.messages.findIndex(x=>x.id===activ
 function onSelected(fn){const m=selectedMessage();if(!m)return alert('操作するコメントを選択してください');fn(m)}
 function moveSelected(step){onSelected(()=>{const id=activeMessage;const oldRects=recordRects('#messages .message','messageId');saveEditing();activeMessage=id;const p=getProject(),i=selectedIndex(),to=i+step;if(to<0||to>=p.messages.length)return;mutate(()=>{const [m]=p.messages.splice(i,1);p.messages.splice(to,0,m)});const m=p.messages.find(x=>x.id===id);if(m)beginEditing(m);renderChat();animateRects('#messages .message','messageId',oldRects);requestAnimationFrame(()=>followMovingComment(id))})}
 $('deleteMsg').onclick=()=>deleteSelectedDirect();
-$('duplicateMsg').onclick=()=>onSelected(m=>{const id=m.id;saveEditing();const p=getProject(),i=p.messages.findIndex(x=>x.id===id);if(i<0)return;const copy={...clone(p.messages[i]),id:uid()};mutate(()=>p.messages.splice(i+1,0,copy));selectMessage(copy.id);});
+$('duplicateMsg').onclick=()=>onSelected(m=>{
+ const sourceId=m.id;
+ saveEditing();
+ const p=getProject(),i=p?.messages.findIndex(x=>x.id===sourceId)??-1;
+ if(i<0)return;
+ const source=p.messages[i];
+ const blank={...clone(source),id:uid(),text:''};
+ mutate(()=>p.messages.splice(i+1,0,blank));
+ selectMessage(blank.id);
+ // Keep the keyboard active if the user was already typing.
+});
 $('upMsg').onclick=()=>moveSelected(-1);$('downMsg').onclick=()=>moveSelected(1);
 $('sideMsg').onclick=()=>onSelected(m=>{const id=m.id;const old=document.querySelector('#messages .message.selected .bubble')?.getBoundingClientRect();saveEditing();const msg=getProject().messages.find(x=>x.id===id);if(!msg)return;mutate(()=>msg.side=msg.side==='left'?'center':msg.side==='center'?'right':'left');beginEditing(msg);renderChat();const dest=document.querySelector('#messages .message.selected .bubble');if(old&&dest&&!matchMedia('(prefers-reduced-motion: reduce)').matches){const now=dest.getBoundingClientRect();dest.animate([{transform:`translate(${old.left-now.left}px,${old.top-now.top}px)`,opacity:.8},{transform:'translate(0,0)',opacity:1}],{duration:270,easing:'ease-out'})}renderSpeakerPicker();requestAnimationFrame(()=>followMovingComment(id))});
 function updateEditNavigator(){const el=$('editNavigator');if(!el)return;const p=getProject(),i=p?.messages.findIndex(m=>m.id===editingMessageId)??-1;el.classList.add('hidden');if(i>=0){$('editPosition').textContent=(i+1)+' / '+p.messages.length;$('editPrev').disabled=i===0;$('editNext').disabled=i===p.messages.length-1}}
@@ -379,8 +389,8 @@ function updateUndoControls(){
  if(u)u.disabled=history.length===0;
  if(r)r.disabled=redoStack.length===0;
 }
-function undoAction(){const last=history.pop();if(!last)return;redoStack.push(JSON.stringify(db));applySnapshot(JSON.parse(last));showActionToast('↶','元に戻しました')}
-function redoAction(){const next=redoStack.pop();if(!next)return;history.push(JSON.stringify(db));applySnapshot(JSON.parse(next));showActionToast('↷','やり直しました')}
+function undoAction(){const last=history.pop();if(!last)return;redoStack.push(JSON.stringify(db));applySnapshot(JSON.parse(last));showActionToast('undo','元に戻しました')}
+function redoAction(){const next=redoStack.pop();if(!next)return;history.push(JSON.stringify(db));applySnapshot(JSON.parse(next));showActionToast('redo','やり直しました')}
 $('undo').onclick=undoAction;$('redo').onclick=redoAction;
 $('helperUndo').onclick=undoAction;$('helperRedo').onclick=redoAction;
 
@@ -625,7 +635,17 @@ if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.s
 $('themeMode').addEventListener('change',e=>{try{localStorage.setItem(THEME_KEY,e.target.value)}catch(err){alert('テーマ設定を保存できませんでした')}applyTheme()});
 
 // v32 integrations
-let toastTimer;function showActionToast(symbol,label){const e=$('actionToast');e.textContent=symbol+'  '+label;e.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>e.classList.remove('show'),650)}
+let toastTimer;function showActionToast(symbol,label){
+ const e=$('actionToast');e.replaceChildren();
+ if(symbol==='undo'||symbol==='redo'){
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d',symbol==='undo'?'M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-2':'m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h2');
+  svg.append(path);e.append(svg);
+ }else{const caption=document.createElement('div');caption.textContent=symbol;e.append(caption)}
+ const caption=document.createElement('span');caption.textContent=label;e.append(caption);
+ e.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>e.classList.remove('show'),650)
+}
 function dateText(n){if(!n)return '日時未記録';const d=new Date(n);if(isNaN(d))return '日時未記録';const z=x=>String(x).padStart(2,'0');return d.getFullYear()+'/'+z(d.getMonth()+1)+'/'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes())}
 function createNamed(title,placeholder,onSave){sheet(title,host=>{const input=document.createElement('input');input.className='field';input.placeholder=placeholder;input.value='';host.append(input,button('作成',()=>{const name=input.value.trim()||placeholder;close();onSave(name)}),button('キャンセル',close));input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();const name=input.value.trim()||placeholder;close();onSave(name)}});input.focus()})}
 let edgeTouch=null;const chatNode=$('messages');chatNode.addEventListener('touchstart',e=>{const t=e.touches[0];edgeTouch=t&&t.clientX<24?{x:t.clientX,y:t.clientY}:null},{passive:true});chatNode.addEventListener('touchend',e=>{if(!edgeTouch)return;const t=e.changedTouches[0],dx=t.clientX-edgeTouch.x,dy=t.clientY-edgeTouch.y;edgeTouch=null;if(dx>100&&Math.abs(dy)<Math.abs(dx)*.6&&page==='chat'&&!editingMessageId){pageTo('home')}} ,{passive:true});
