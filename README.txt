@@ -22,3 +22,7 @@
 - 文章チェックは簡易ヒューリスティックで、日本語の誤字脱字を網羅するものではありません。
 - キーボード・iOS PWA・動画ファイル出力の実機テストは未実施です。
 - 更新前に完全JSONバックアップを取ってください。従来のデータ形式・IndexedDBのストアは保持します。
+
+Version 36: recent conversation UI, compact sort dropdown, character-count sort and long-press folder reorder.
+
+Version 37: blue SVG folder icons, jump-to-top/bottom SVG icons, and adjusted iPhone top spacing.
