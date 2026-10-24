@@ -37,7 +37,7 @@ function persist(){const snapshot=clone(db);showSaveState('saving');
 $('saveState').onclick=()=>{if(saveState==='error')sheet('保存に失敗しました',host=>host.append(button('再試行',()=>{close();persist()}),button('バックアップを書き出す',()=>{close();$('exportJson').click()}),button('閉じる',close)))};
 function applySnapshot(snapshot){db=snapshot;persist();renderAll();updateUndoControls()}
 async function initializeStorage(){try{disk=await openDatabase();const stored=await idbRead();if(stored&&Array.isArray(stored.projects)&&Array.isArray(stored.characters)){db=stored}else{await idbWrite(clone(db))}storageReady=true;renderAll();pageTo('home')}catch(e){console.warn('IndexedDB unavailable, old storage remains',e);disk=null;storageReady=true;renderAll();pageTo('home');alert('IndexedDBが使用できません。旧保存方式で起動しました。バックアップを保存してください。')}}
-function mutate(fn){const old=db.projects.map(p=>[p.id,JSON.stringify([p.title,p.folderId,p.messages,p.favorite])]);save();fn();db.projects.forEach(p=>{const before=old.find(x=>x[0]===p.id);if(before&&before[1]!==JSON.stringify([p.title,p.folderId,p.messages,p.favorite]))p.updatedAt=Date.now();p.createdAt??=p.updatedAt});persist();renderAll();updateUndoControls()};function notify(s){alert(s)};
+function mutate(fn,action='操作'){lastActionName=action;const old=db.projects.map(p=>[p.id,JSON.stringify([p.title,p.folderId,p.messages,p.favorite])]);save();fn();db.projects.forEach(p=>{const before=old.find(x=>x[0]===p.id);if(before&&before[1]!==JSON.stringify([p.title,p.folderId,p.messages,p.favorite]))p.updatedAt=Date.now();p.createdAt??=p.updatedAt});persist();renderAll();updateUndoControls()};function notify(s){alert(s)};
 function updateChatSummary(){
  const label=$('chatSummary'),p=getProject();if(!label)return;
  const show=page==='chat'&&!!p;label.classList.toggle('hidden',!show);
@@ -45,17 +45,28 @@ function updateChatSummary(){
  const ms=p.messages.length?timeline().duration:0; const total=Math.max(0,Math.ceil(ms/1000));
  label.textContent=`${p.messages.length}コメント ・ 動画 約${Math.floor(total/60)}分${String(total%60).padStart(2,'0')}秒`;
 }
-function pageTo(p){if(editingMessageId&&p!=='chat')saveEditing();page=p;updateChatSummary();document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id===p));$('back').style.visibility=(p==='chat'||p==='video')?'visible':'hidden';$('title').textContent=p==='chat'?(getProject()?.title||'会話'):({'home':'トークラフト','characters':'キャラクター','settings':'設定','video':'動画'}[p]);$('topAdd').style.visibility=(p==='home'||p==='chat')?'visible':'hidden';$('topAdd').textContent=p==='chat'?'🎥':'＋';['searchToggle','textMenu','chatMore'].forEach(id=>$(id).classList.toggle('hidden',p!=='chat'));if(p==='characters')renderCharacters();if(p==='chat'){renderChat();if(lastChatId!==current){lastChatId=current;requestAnimationFrame(()=>{$('messages').scrollTop=$('messages').scrollHeight})}}if(p==='video'){$('videoProjectName').textContent=getProject()?.title||'';drawVideo(9999);}}
+function pageTo(p){const fromPage=page;if(editingMessageId&&p!=='chat')saveEditing();page=p;updateChatSummary();document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id===p));$('back').style.visibility=(p==='chat'||p==='video')?'visible':'hidden';$('title').textContent=p==='chat'?(getProject()?.title||'会話'):({'home':'トークラフト','characters':'キャラクター','settings':'設定','video':'動画'}[p]);$('topAdd').style.visibility=(p==='home'||p==='chat')?'visible':'hidden';$('topAdd').textContent=p==='chat'?'🎥':'＋';['searchToggle','textMenu','chatMore'].forEach(id=>$(id).classList.toggle('hidden',p!=='chat'));if(p==='characters')renderCharacters();if(p==='chat'){renderChat();if(fromPage==='home'||lastChatId!==current){lastChatId=current;rememberProject(current);requestAnimationFrame(()=>{$('messages').scrollTop=0})}}if(p==='video'){$('videoProjectName').textContent=getProject()?.title||'';drawVideo(9999);}}
 $('title').addEventListener('click',()=>{if(page!=='chat')return;const p=getProject();if(!p)return;ask('会話のタイトルを変更',p.title,v=>{mutate(()=>p.title=v);$('title').textContent=v})});
 function button(text,fn,danger=false){const b=document.createElement('button');b.className='action'+(danger?' danger':'');b.textContent=text;b.onclick=fn;return b}
 function sheet(title,make){$('sheet').replaceChildren();const h=document.createElement('h3');h.textContent=title;$('sheet').append(h);make($('sheet'));$('shade').classList.add('open')};function close(){ $('shade').classList.remove('open')};$('shade').onclick=e=>{if(e.target===$('shade'))close()};
 function ask(label,value,cb){const v=prompt(label,value);if(v!==null&&v.trim())cb(v.trim())};
-let favoritesOnly=false;function renderHome(){const host=$('projectList');const scrollBefore=host.scrollTop;host.replaceChildren();const term=$('search').value.trim().toLowerCase();const active=db.folders.find(f=>f.id===openFolderId);if(openFolderId&&!active)openFolderId=null;$('folderBack').classList.toggle('hidden',!openFolderId);const title=$('currentFolderTitle');title.textContent=active?'📂 '+active.name+' の会話一覧':'📁 フォルダ一覧';title.classList.remove('hidden');$('newFolder').classList.toggle('hidden',!!openFolderId);const folders=openFolderId?db.folders.filter(f=>f.id===openFolderId):db.folders;if(favoritesOnly){folders.splice(0,folders.length,...db.folders);}
+let favoritesOnly=false;
+const SORT_KEY='talkraft-folder-sorts-v35',RECENT_KEY='talkraft-recent-v35';
+let folderSorts={};try{folderSorts=JSON.parse(localStorage.getItem(SORT_KEY)||'{}')}catch{}
+let recentProjects=[];try{recentProjects=JSON.parse(localStorage.getItem(RECENT_KEY)||'[]')}catch{}
+let lastActionName='操作';
+function rememberProject(id){recentProjects=[id,...recentProjects.filter(v=>v!==id)].slice(0,5);try{localStorage.setItem(RECENT_KEY,JSON.stringify(recentProjects))}catch{}}
+function sortProjects(items,id){const mode=folderSorts[id]||'manual';if(mode==='manual')return items;return [...items].sort((a,b)=> mode==='count'? b.messages.length-a.messages.length: (Number(b[mode==='created'?'createdAt':'updatedAt'])||0)-(Number(a[mode==='created'?'createdAt':'updatedAt'])||0))}
+function renderHome(){const host=$('projectList');const scrollBefore=host.scrollTop;host.replaceChildren();const term=$('search').value.trim().toLowerCase();const active=db.folders.find(f=>f.id===openFolderId);if(openFolderId&&!active)openFolderId=null;$('folderBack').classList.toggle('hidden',!openFolderId);const title=$('currentFolderTitle');title.textContent=active?'📂 '+active.name+' の会話一覧':'📁 フォルダ一覧';title.classList.remove('hidden');$('newFolder').classList.toggle('hidden',!!openFolderId);const folders=openFolderId?db.folders.filter(f=>f.id===openFolderId):db.folders;if(favoritesOnly){folders.splice(0,folders.length,...db.folders);}
+if(!openFolderId&&!term&&recentProjects.length){const p=db.projects.find(x=>x.id===recentProjects[0]);if(p){const recent=document.createElement('button');recent.className='recent-chat';recent.textContent='↩ さっきまでの会話：'+p.title;recent.onclick=()=>{current=p.id;activeMessage=null;pageTo('chat')};host.append(recent)}}
 for(const f of folders){const list=db.projects.filter(p=>p.folderId===f.id&&(!favoritesOnly||p.favorite)&&(p.title.toLowerCase().includes(term)||p.messages.some(m=>m.text.toLowerCase().includes(term))));if(term&&!list.length)continue;
-if(!openFolderId&&!favoritesOnly){const row=document.createElement('div');row.className='folder-row';row.innerHTML='<span>📁</span><span class="grow"></span><span class="arrow">›</span>';row.querySelector('.grow').textContent=f.name+' ('+list.length+')';row.onclick=()=>{openFolderId=f.id;renderHome()};const menu=document.createElement('button');menu.textContent='⋯';menu.setAttribute('aria-label','フォルダの操作');menu.onclick=e=>{e.stopPropagation();folderMenu(f.id)};row.append(menu);host.append(row);continue}
+if(!openFolderId&&!favoritesOnly){const row=document.createElement('div');row.className='folder-row';row.dataset.id=f.id;row.innerHTML='<span>📁</span><span class="grow"><strong></strong><small></small></span><span class="arrow">›</span>';row.querySelector('strong').textContent=f.name;row.querySelector('small').textContent=list.length+'件の会話';row.onclick=()=>{openFolderId=f.id;renderHome()};const menu=document.createElement('button');menu.textContent='⋯';menu.setAttribute('aria-label','フォルダの操作');menu.onclick=e=>{e.stopPropagation();folderMenu(f.id)};row.append(menu);host.append(row);continue}
 const heading=document.createElement('div');heading.className='section-heading';heading.textContent='📁 '+f.name+'　('+list.length+' 件)';heading.onclick=()=>folderMenu(f.id);host.append(heading);
-for(const p of list){const row=document.createElement('button');row.className='item conversation-item';row.innerHTML='<span class="emo conversation-symbol"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8M8 12h5"/></svg></span><div class="grow"><div></div><div class="sub"></div></div><span class="arrow">›</span>';row.querySelector('.grow>div').textContent=(p.favorite?'★ ':'')+p.title;const speakers=new Set(p.messages.filter(m=>m.side!=='center').map(m=>character(m.characterId).name));row.querySelector('.sub').textContent=p.messages.length+'件のコメント ・ 登場キャラ'+speakers.size+'人'+'\n作成：'+dateText(p.createdAt)+'\n更新：'+dateText(p.updatedAt);row.querySelector('.sub').style.whiteSpace='pre-line';row.onclick=()=>{current=p.id;activeMessage=null;pageTo('chat')};row.oncontextmenu=e=>{e.preventDefault();projectMenu(p.id)};let press;row.addEventListener('touchstart',()=>press=setTimeout(()=>projectMenu(p.id),550),{passive:true});['touchend','touchcancel','touchmove'].forEach(k=>row.addEventListener(k,()=>clearTimeout(press),{passive:true}));const more=document.createElement('button');more.textContent='⋯';more.className='iconbtn';more.onclick=e=>{e.stopPropagation();projectMenu(p.id)};row.append(more);host.append(row)} }
-host.scrollTop=openFolderId?scrollBefore:0;}
+if(!term){const sortWrap=document.createElement('div');sortWrap.className='sort-row';const sel=document.createElement('select');sel.setAttribute('aria-label','会話の並び順');[['manual','手動順'],['updated','更新日時が新しい順'],['created','作成日時が新しい順'],['count','コメント数が多い順']].forEach(([v,l])=>{const op=document.createElement('option');op.value=v;op.textContent=l;sel.append(op)});sel.value=folderSorts[f.id]||'manual';sel.onchange=()=>{folderSorts[f.id]=sel.value;try{localStorage.setItem(SORT_KEY,JSON.stringify(folderSorts))}catch{}renderHome()};sortWrap.append(sel);host.append(sortWrap)}
+for(const p of sortProjects(list,f.id)){const row=document.createElement('button');row.className='item conversation-item';row.innerHTML='<span class="emo conversation-symbol"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8M8 12h5"/></svg></span><div class="grow"><div></div><div class="sub"></div></div><span class="arrow">›</span>';row.querySelector('.grow>div').textContent=(p.favorite?'★ ':'')+p.title;const speakers=new Set(p.messages.filter(m=>m.side!=='center').map(m=>character(m.characterId).name));row.querySelector('.sub').textContent=p.messages.length+'件のコメント ・ 登場キャラ'+speakers.size+'人'+'\n作成：'+dateText(p.createdAt)+'\n更新：'+dateText(p.updatedAt);row.querySelector('.sub').style.whiteSpace='pre-line';row.onclick=()=>{current=p.id;rememberProject(p.id);activeMessage=null;pageTo('chat')};row.oncontextmenu=e=>{e.preventDefault();projectMenu(p.id)};let press;row.addEventListener('touchstart',()=>press=setTimeout(()=>projectMenu(p.id),550),{passive:true});['touchend','touchcancel','touchmove'].forEach(k=>row.addEventListener(k,()=>clearTimeout(press),{passive:true}));const more=document.createElement('button');more.textContent='⋯';more.className='iconbtn';more.onclick=e=>{e.stopPropagation();projectMenu(p.id)};row.append(more);host.append(row)} }
+host.scrollTop=openFolderId?scrollBefore:0;
+ if(!openFolderId&&!favoritesOnly&&!term){enableLiveSort(host,'.folder-row','id',ids=>mutate(()=>db.folders.sort((a,b)=>ids.indexOf(a.id)-ids.indexOf(b.id)),'フォルダ並べ替え'))}
+}
 function folderMenu(id){const f=db.folders.find(x=>x.id===id);sheet('フォルダ：'+f.name,host=>{host.append(button('名前を変更',()=>{close();ask('フォルダ名',f.name,v=>mutate(()=>f.name=v))}));if(id!=='folder0')host.append(button('フォルダを削除（会話は「すべての会話」へ）',()=>{if(!confirm('このフォルダを削除しますか？\n会話は「すべての会話」に移動します。'))return;close();mutate(()=>{db.projects.filter(p=>p.folderId===id).forEach(p=>p.folderId='folder0');db.folders=db.folders.filter(x=>x.id!==id)})},true));host.append(button('閉じる',close))})}
 function newProject(){createNamed('新しい会話のタイトル','新しい会話',v=>{const f=openFolderId||db.folders[0].id;mutate(()=>{const p={id:uid(),folderId:f,title:v,favorite:false,messages:[],createdAt:Date.now(),updatedAt:Date.now()};db.projects.unshift(p);current=p.id;activeMessage=null});pageTo('chat')})}
 function projectMenu(id){const p=db.projects.find(x=>x.id===id);sheet(p.title,host=>{const usedNames=new Set(p.messages.filter(m=>m.side!=='center').map(m=>character(m.characterId).name));const used=[...usedNames].map(name=>db.characters.map((c,i)=>({...c,_order:c.createdOrder??i})).filter(c=>c.name===name).sort((a,b)=>a._order-b._order)[0]).filter(Boolean);if(used.length){const box=document.createElement('div');box.className='character-summary';box.style.cssText='padding:10px 2px;border-bottom:1px solid #555;margin-bottom:10px';const label=document.createElement('p');label.className='hint';label.textContent='登場キャラクター';box.append(label);used.forEach(c=>{const item=document.createElement('div');item.style.cssText='display:flex;align-items:center;gap:10px;padding:5px';const icon=document.createElement('span');icon.className='avatar';icon.style.cssText='width:32px;height:32px';setIcon(icon,c);const name=document.createElement('span');name.textContent=c.name;item.append(icon,name);box.append(item)});host.append(box)}host.append(button('開く',()=>{current=id;close();pageTo('chat')}),button('タイトル変更',()=>{close();ask('タイトル',p.title,v=>mutate(()=>p.title=v))}),button('会話全体を複製',()=>{close();mutate(()=>{const cp=clone(p);cp.id=uid();cp.title+='（コピー）';cp.messages.forEach(m=>m.id=uid());db.projects.unshift(cp)})}),button(p.favorite?'★ お気に入り解除':'☆ お気に入り登録',()=>{close();mutate(()=>p.favorite=!p.favorite)}),button('別のフォルダに移動',()=>chooseFolder(p)),button('テキスト書き出し・コピー',()=>openProjectTextExport(p)),button('テキスト一括読み込み',()=>{current=p.id;openTextImport()}),button('会話を削除',()=>{if(confirm('この会話を削除しますか？')){close();mutate(()=>{db.projects=db.projects.filter(x=>x.id!==id);if(current===id)current=db.projects[0]?.id||''});pageTo('home')}},true))})}
@@ -89,7 +100,7 @@ $('duplicateMsg').onclick=()=>onSelected(m=>{
  if(i<0)return;
  const source=p.messages[i];
  const blank={...clone(source),id:uid(),text:''};
- mutate(()=>p.messages.splice(i+1,0,blank));
+ mutate(()=>p.messages.splice(i+1,0,blank),'コメント追加');
  selectMessage(blank.id);
  // Keep the keyboard active if the user was already typing.
 });
@@ -108,20 +119,23 @@ function beginEditing(m){
   // The picker must match the selected comment, not the last composed comment.
   if(m.side!=='center'&&selectableCharacters().some(c=>c.id===m.characterId)){selectedSpeaker=m.characterId;renderAvatarStrip()}
   $('entry').value=m.text;
+  try{const draft=JSON.parse(sessionStorage.getItem('talkraft-draft')||'null');if(draft&&draft.project===current&&draft.id===m.id&&typeof draft.text==='string')$('entry').value=draft.text}catch{}
   updateEditNavigator();
-  $('entry').placeholder='コメントを編集中…';
+  $('entry').placeholder=m.text?'コメントを編集中…':'新しいコメントを入力…';previewEditingText();
   // Do not focus the editor here: browsers scroll focused inputs into view.
 }
 function isEditDirty(){const m=getProject()?.messages.find(x=>x.id===editingMessageId);return !!m&&($('entry').value!==m.text||(m.side!=='center'&&selectedSpeaker!==m.characterId));}
 function confirmLeaveEdit(){return true;}
 function saveEditing(){
+ try{sessionStorage.removeItem('talkraft-draft')}catch{}
  if(!editingMessageId)return;
  const m=getProject()?.messages.find(x=>x.id===editingMessageId);
  if(!m){finishEdit();return;}
  const text=$('entry').value;
+ if(!text.trim()){const id=m.id;finishEdit();mutate(()=>{const pr=getProject();if(pr)pr.messages=pr.messages.filter(x=>x.id!==id)});return;}
  const speaker=selectedSpeaker;
  if(text!==m.text||(m.side!=='center'&&speaker&&speaker!==m.characterId)){
-  mutate(()=>{m.text=text;if(m.side!=='center'&&speaker&&selectableCharacters().some(c=>c.id===speaker))m.characterId=speaker});
+  mutate(()=>{m.text=text;if(m.side!=='center'&&speaker&&selectableCharacters().some(c=>c.id===speaker))m.characterId=speaker},'コメント編集');
  }
  finishEdit();
 }
@@ -129,10 +143,10 @@ function previewEditingText(){
  if(!editingMessageId)return;
  const row=[...$('messages').querySelectorAll('.message')].find(el=>el.dataset.messageId===editingMessageId);
  const bubble=row?.querySelector('.bubble');if(!bubble)return;
- bubble.textContent=$('entry').value;
+ bubble.textContent=$('entry').value||'コメントを入力…';bubble.classList.toggle('empty-placeholder',!$('entry').value);
 }
 
-function deleteSelectedDirect(){const m=selectedMessage();if(!m)return;const id=m.id;finishEdit();mutate(()=>{const p=getProject();p.messages=p.messages.filter(x=>x.id!==id)});}
+function deleteSelectedDirect(){try{sessionStorage.removeItem('talkraft-draft')}catch{}const m=selectedMessage();if(!m)return;const id=m.id;finishEdit();mutate(()=>{const p=getProject();p.messages=p.messages.filter(x=>x.id!==id)},'コメント削除');}
 function selectMessage(id){
   if(editingMessageId && editingMessageId!==id)saveEditing();
   const m=getProject()?.messages.find(x=>x.id===id);if(!m)return;
@@ -145,6 +159,7 @@ function selectMessage(id){
   resizeEntry();
   // Entering edit mode alone must retain the scroll position.
   scheduleKeyboardAnchor();
+  requestAnimationFrame(()=>{const row=[...$('messages').querySelectorAll('.message')].find(n=>n.dataset.messageId===id);if(!row)return;const area=$('messages').getBoundingClientRect(),r=row.getBoundingClientRect();if(r.bottom>area.bottom-14)$('messages').scrollTo({top:$('messages').scrollTop+r.bottom-area.bottom+18,behavior:'smooth'})});
 }
 // Only anchor after the on-screen keyboard has reduced the visible viewport.
 // Listening to visualViewport.resize covers delayed iOS Safari keyboard animations.
@@ -231,7 +246,7 @@ let speakerTouchX=null;
 $('speakerPicker').addEventListener('touchstart',e=>{speakerTouchX=e.touches[0]?.clientX??null},{passive:true});
 $('speakerPicker').addEventListener('touchend',e=>{if(speakerTouchX===null)return;const dx=(e.changedTouches[0]?.clientX??speakerTouchX)-speakerTouchX;speakerTouchX=null;if(Math.abs(dx)<24)return;e.preventDefault();e.stopPropagation();const chars=selectableCharacters();if(!chars.length)return;const i=chars.findIndex(c=>c.id===selectedSpeaker);const next=chars[(i+(dx<0?1:-1)+chars.length)%chars.length];selectedSpeaker=next.id;renderSpeakerPicker();renderAvatarStrip();if(editingMessageId)previewEditingSpeaker()},{passive:false});
 
-function renderChat(){const p=getProject();if(!p)return;updateChatSummary();const host=$('messages');host.style.background=db.settings.bg||'#a9cff0';host.style.paddingBottom=editingMessageId&&keyboardShowing()?Math.max(100,host.clientHeight-90)+'px':'24px';host.style.gap=db.settings.gap+'px';host.style.setProperty('--msg-size',db.settings.font+'px');const scrollBefore=host.scrollTop;host.replaceChildren();const sel=$('speaker'),old=sel.value;sel.replaceChildren();selectableCharacters().forEach(c=>{const op=document.createElement('option');op.value=c.id;op.textContent=c.icon+' '+c.name;sel.append(op)});if(selectableCharacters().some(c=>c.id===old))sel.value=old; if(selectedSpeaker&&selectableCharacters().some(c=>c.id===selectedSpeaker))sel.value=selectedSpeaker;renderAvatarStrip();for(const m of p.messages){const c=character(m.characterId),row=document.createElement('div');const side=((m.side||c.side)==='right'?'right':m.side==='center'?'center':'left');row.className='message '+(side==='left'?'':side);row.dataset.messageId=m.id;const av=document.createElement('div');av.className='avatar';setIcon(av,c);const meta=document.createElement('div');meta.className='msgcontent';const name=document.createElement('div');name.className='who';name.textContent=c.name;name.style.fontSize=(db.settings.nameSize??14)+'px';name.hidden=db.settings.showNames===false||m.side==='center';const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.text;if(m.side==='center'){bubble.style.fontSize=(db.settings.narratorSize||14)+'px';bubble.style.fontWeight=db.settings.narratorBold?'700':'400'}meta.append(name,bubble);if(m.side==='center'){av.remove();row.append(meta)}else row.append(av,meta);row.classList.toggle('selected',activeMessage===m.id);const activate=()=>{if(bulkMode){toggleBulk(m.id);return}selectMessage(m.id)};
+function renderChat(){const p=getProject();if(!p)return;updateChatSummary();const host=$('messages');host.style.background=db.settings.bg||'#a9cff0';host.style.paddingBottom=editingMessageId&&keyboardShowing()?Math.max(100,host.clientHeight-90)+'px':'24px';host.style.gap=db.settings.gap+'px';host.style.setProperty('--msg-size',db.settings.font+'px');const scrollBefore=host.scrollTop;host.replaceChildren();const sel=$('speaker'),old=sel.value;sel.replaceChildren();selectableCharacters().forEach(c=>{const op=document.createElement('option');op.value=c.id;op.textContent=c.icon+' '+c.name;sel.append(op)});if(selectableCharacters().some(c=>c.id===old))sel.value=old; if(selectedSpeaker&&selectableCharacters().some(c=>c.id===selectedSpeaker))sel.value=selectedSpeaker;renderAvatarStrip();for(const m of p.messages){const c=character(m.characterId),row=document.createElement('div');const side=((m.side||c.side)==='right'?'right':m.side==='center'?'center':'left');row.className='message '+(side==='left'?'':side);row.dataset.messageId=m.id;const av=document.createElement('div');av.className='avatar';setIcon(av,c);const meta=document.createElement('div');meta.className='msgcontent';const name=document.createElement('div');name.className='who';name.textContent=c.name;name.style.fontSize=(db.settings.nameSize??14)+'px';name.hidden=db.settings.showNames===false||m.side==='center';const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.text||(editingMessageId===m.id?'コメントを入力…':'');bubble.classList.toggle('empty-placeholder',!m.text&&editingMessageId===m.id);if(m.side==='center'){bubble.style.fontSize=(db.settings.narratorSize||14)+'px';bubble.style.fontWeight=db.settings.narratorBold?'700':'400'}meta.append(name,bubble);if(m.side==='center'){av.remove();row.append(meta)}else row.append(av,meta);row.classList.toggle('selected',activeMessage===m.id);const activate=()=>{if(bulkMode){toggleBulk(m.id);return}selectMessage(m.id)};
  bubble.addEventListener('click',e=>{if(Date.now()<chatDragIgnoreClicksUntil){e.preventDefault();e.stopPropagation();return}activate()});
  if(m.side==='center'){/* narrator body is clickable */}
  else{av.addEventListener('click',e=>{e.stopPropagation();if(Date.now()>=chatDragIgnoreClicksUntil)activate()});}
@@ -389,8 +404,8 @@ function updateUndoControls(){
  if(u)u.disabled=history.length===0;
  if(r)r.disabled=redoStack.length===0;
 }
-function undoAction(){const last=history.pop();if(!last)return;redoStack.push(JSON.stringify(db));applySnapshot(JSON.parse(last));showActionToast('undo','元に戻しました')}
-function redoAction(){const next=redoStack.pop();if(!next)return;history.push(JSON.stringify(db));applySnapshot(JSON.parse(next));showActionToast('redo','やり直しました')}
+function undoAction(){const last=history.pop();if(!last)return;redoStack.push(JSON.stringify(db));applySnapshot(JSON.parse(last));showActionToast('undo',lastActionName+'を元に戻しました')}
+function redoAction(){const next=redoStack.pop();if(!next)return;history.push(JSON.stringify(db));applySnapshot(JSON.parse(next));showActionToast('redo',lastActionName+'をやり直しました')}
 $('undo').onclick=undoAction;$('redo').onclick=redoAction;
 $('helperUndo').onclick=undoAction;$('helperRedo').onclick=redoAction;
 
@@ -444,7 +459,7 @@ function attachChatLongDrag(row,host){
   currentDrag.ghost.remove();row.classList.remove('chat-drag-placeholder');chatDragIgnoreClicksUntil=Date.now()+700;
   const ids=cancel?currentDrag.oldIds:[...host.querySelectorAll('.message')].map(e=>e.dataset.messageId);
   if(cancel){const rows=new Map([...host.querySelectorAll('.message')].map(e=>[e.dataset.messageId,e]));ids.forEach(id=>host.append(rows.get(id)));return}
-  if(ids.join('|')!==currentDrag.oldIds.join('|')){
+  if(ids.join('|')!==currentDrag.oldIds.join('|')){if(navigator.vibrate)navigator.vibrate(12);
    if(editingMessageId)saveEditing();
    const p=getProject();if(p)mutate(()=>{const mapping=new Map(p.messages.map(m=>[m.id,m]));p.messages=ids.map(id=>mapping.get(id)).filter(Boolean)});
   }
@@ -461,9 +476,9 @@ function nextCommentSide(messages, speakerId){
 let lastPostedId=null;
 function sendEntry(){const p=getProject(),input=$('entry'),value=input.value.trim();if(!p)return;if(editingMessageId&&!value){deleteSelectedDirect();return}if(!value)return;
 if(editingMessageId){completeEditing();return}
-const who=selectedSpeaker||$('speaker').value||selectableCharacters()[0]?.id;if(!who)return alert('先にキャラクターを登録してください');const message={id:uid(),characterId:who,side:nextCommentSide(p.messages,who),text:value};mutate(()=>p.messages.push(message));lastPostedId=message.id;input.value='';activeMessage=null;iconChooserOpen=false;resizeEntry();renderChat();requestAnimationFrame(()=>{$('messages').scrollTop=$('messages').scrollHeight})}
+const who=selectedSpeaker||$('speaker').value||selectableCharacters()[0]?.id;if(!who)return alert('先にキャラクターを登録してください');const message={id:uid(),characterId:who,side:nextCommentSide(p.messages,who),text:value};mutate(()=>p.messages.push(message),'コメント投稿');lastPostedId=message.id;input.value='';activeMessage=null;iconChooserOpen=false;resizeEntry();renderChat();requestAnimationFrame(()=>{$('messages').scrollTop=$('messages').scrollHeight})}
 $('nameSize').onchange=e=>{db.settings.nameSize=Number(e.target.value);persist();renderSettings();if(page==='chat')renderChat();if(page==='video'&&!playing)drawVideo(9999)};$('showNames').onchange=e=>{db.settings.showNames=e.target.checked;persist();renderSettings();if(page==='chat')renderChat();if(page==='video'&&!playing)drawVideo(9999)};
-$('entry').addEventListener('input',()=>{resizeEntry();previewEditingText()});$('entry').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229){e.preventDefault();sendEntry()}});let caretStart=0,caretEnd=0;
+$('entry').addEventListener('input',()=>{resizeEntry();previewEditingText();if(editingMessageId){try{sessionStorage.setItem('talkraft-draft',JSON.stringify({project:current,id:editingMessageId,text:$('entry').value}))}catch{}}});$('entry').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229){e.preventDefault();sendEntry()}});let caretStart=0,caretEnd=0;
 const captureCaret=()=>{caretStart=$('entry').selectionStart;caretEnd=$('entry').selectionEnd};
 ['keyup','click','select','input'].forEach(type=>$('entry').addEventListener(type,captureCaret));
 $('newline').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();captureCaret()});
@@ -654,3 +669,13 @@ $('videoRewind10').onclick=()=>jump10(-1);$('videoForward10').onclick=()=>jump10
 
 
 function followMovingComment(id){if(!id||page!=='chat')return;const host=$('messages'),item=[...host.querySelectorAll('.message')].find(e=>e.dataset.messageId===id);if(!item)return;const area=host.getBoundingClientRect(),rect=item.getBoundingClientRect(),margin=55;let delta=0;if(rect.top<area.top+margin)delta=rect.top-(area.top+margin);else if(rect.bottom>area.bottom-margin)delta=rect.bottom-(area.bottom-margin);if(Math.abs(delta)>1)host.scrollTo({top:Math.max(0,host.scrollTop+delta),behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'})}
+
+// v35: focus-sensitive newline button, with no change to the text editor itself.
+function syncNewlineButton(){const b=$('helperNewline');if(!b)return;b.disabled=document.activeElement!==$('entry');b.setAttribute('aria-disabled',String(b.disabled))}
+$('entry').addEventListener('focus',syncNewlineButton);$('entry').addEventListener('blur',()=>setTimeout(syncNewlineButton,0));syncNewlineButton();
+// Restore the last conversations shortcut at the folder screen.
+
+// Reload-safe UI preferences use localStorage; conversation content stays in IndexedDB.
+
+$('jumpFirst').onclick=()=>{$('messages').scrollTo({top:0,behavior:'smooth'})};
+$('jumpLast').onclick=()=>{$('messages').scrollTo({top:$('messages').scrollHeight,behavior:'smooth'})};
