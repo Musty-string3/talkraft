@@ -1,4 +1,5 @@
-Talkraft v40
-- Representative-character group reorder, without search or bulk top/bottom selection.
-- Video progress expanded: horizontal bar only; collapsed: ring only; done: no progress bar.
-- Existing data retained. iPhone testing required.
+Talkraft v41
+- Multiple individual pinned characters, pinned first only in comment speaker selector.
+- Video preview transport: rewind 10s / play-pause / forward 10s in one row.
+- Representative group sorting and existing data retained.
+- Before updating, export a full JSON backup.
