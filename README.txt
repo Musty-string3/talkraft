@@ -1,20 +1,4 @@
-Talkraft v39 (2026-10-27)
-
-v38 からの変更:
-- 動画キャンバス: 1080x1920 を維持、上下10%の安全余白、吹き出しの尻尾を再現。
-- 文字折り返し: ブラウザーのCSS行分割測定を動画Canvas描画に利用。手動改行を保持。
-- プレビューを画面幅に拡大。共通表示間隔と再生速度を表示・変更。
-- 動画書き出し中は画面内の別タブに移動可能。右上に折りたためる進捗リング(%)、完了後は保存画面へ戻る。
-- 動画作成開始時に対象会話の内容をスナップショット化。
-- 会話の操作メニューのアイコンをSVGへ統一。
-- コメント編集後に前回編集位置へ戻るボタンと一時強調。
-- 設定 > データ管理にバックアップ案内付きの再読み込み確認。
-- キャラ一覧に検索・選択による一括並べ替え、登録日時順、名前順。
-- 編集改行ボタンのカーソル位置保持・入力イベント連携を改善。
-
-注意:
-- iPhone実機、Safari PWAでの録画継続、キーボード・改行は実機検証未了。
-- フォントと端末サイズによる自動折り返し差は完全一致を保証できません。
-- Safariで動画出力がサポートされない場合は従来どおり利用不可です。
-- 更新前に完全JSONバックアップを保存してください。
-- GitHub PagesにはZIP解凍後の全ファイルをアップロードしてください。
+Talkraft v40
+- Representative-character group reorder, without search or bulk top/bottom selection.
+- Video progress expanded: horizontal bar only; collapsed: ring only; done: no progress bar.
+- Existing data retained. iPhone testing required.
