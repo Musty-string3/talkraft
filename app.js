@@ -45,7 +45,7 @@ function updateChatSummary(){
  const ms=p.messages.length?timeline().duration:0; const total=Math.max(0,Math.ceil(ms/1000));
  label.textContent=`${p.messages.length}コメント ・ 動画 約${Math.floor(total/60)}分${String(total%60).padStart(2,'0')}秒`;
 }
-function pageTo(p){const fromPage=page;if(editingMessageId&&p!=='chat')saveEditing();page=p;updateChatSummary();document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id===p));$('back').style.visibility=(p==='chat'||p==='video')?'visible':'hidden';$('title').textContent=p==='chat'?(getProject()?.title||'会話'):({'home':'トークラフト','characters':'キャラクター','settings':'設定','video':'動画'}[p]);$('topAdd').style.visibility=(p==='home'||p==='chat')?'visible':'hidden';$('topAdd').textContent=p==='chat'?'🎥':'＋';['searchToggle','textMenu','chatMore'].forEach(id=>$(id).classList.toggle('hidden',p!=='chat'));if(p==='characters')renderCharacters();if(p==='chat'){renderChat();if(fromPage==='home'||lastChatId!==current){lastChatId=current;rememberProject(current);requestAnimationFrame(()=>{$('messages').scrollTop=0})}}if(p==='video'){$('videoProjectName').textContent=getProject()?.title||'';drawVideo(9999);}}
+function pageTo(p){const fromPage=page;if(editingMessageId&&p!=='chat')saveEditing();page=p;updateChatSummary();document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id===p));$('back').style.visibility=(p==='chat'||p==='video')?'visible':'hidden';$('title').textContent=p==='chat'?(getProject()?.title||'会話'):({'home':'トークラフト','characters':'キャラクター','settings':'設定','video':'動画'}[p]);$('topAdd').style.visibility=(p==='home'||p==='chat')?'visible':'hidden';$('topAdd').textContent=p==='chat'?'🎥':'＋';['searchToggle','textMenu','chatMore'].forEach(id=>$(id).classList.toggle('hidden',p!=='chat'));if(p==='characters')renderCharacters();if(p==='chat'){renderChat();if(fromPage==='home'||lastChatId!==current){lastChatId=current;rememberProject(current);requestAnimationFrame(()=>{$('messages').scrollTop=0})}}if(p==='video'){$('videoProjectName').textContent=getProject()?.title||'';drawVideo(9999);updateVideoSettingsUI();}}
 $('title').addEventListener('click',()=>{if(page!=='chat')return;const p=getProject();if(!p)return;ask('会話のタイトルを変更',p.title,v=>{mutate(()=>p.title=v);$('title').textContent=v})});
 function button(text,fn,danger=false){const b=document.createElement('button');b.className='action'+(danger?' danger':'');b.textContent=text;b.onclick=fn;return b}
 function sheet(title,make){$('sheet').replaceChildren();const h=document.createElement('h3');h.textContent=title;$('sheet').append(h);make($('sheet'));$('shade').classList.add('open')};function close(){ $('shade').classList.remove('open')};$('shade').onclick=e=>{if(e.target===$('shade'))close()};
@@ -135,6 +135,7 @@ function cancelEditing(){$('messages').style.paddingBottom='24px';if(editingMess
 function beginEditing(m){
   activeMessage=m.id;
   editingMessageId=m.id;
+  rememberEditedPosition(current,m.id);
   // Do not move the conversation until the keyboard actually opens.
   $('messages').style.paddingBottom='24px';
   // The picker must match the selected comment, not the last composed comment.
@@ -432,8 +433,8 @@ $('helperUndo').onclick=undoAction;$('helperRedo').onclick=redoAction;
 
 
 // Reuse the validated existing newline insertion handler, including cursor preservation.
-$('helperNewline').addEventListener('pointerdown',e=>e.preventDefault());
-$('helperNewline').onclick=e=>{$('newline').click()};
+$('helperNewline').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();const input=$('entry');if(document.activeElement===input){caretStart=input.selectionStart;caretEnd=input.selectionEnd}});
+$('helperNewline').onclick=e=>{e.preventDefault();e.stopPropagation();if($('helperNewline').disabled)return;const input=$('entry');const st=Math.min(caretStart,input.value.length),en=Math.min(caretEnd,input.value.length);input.setRangeText('\n',st,en,'end');caretStart=caretEnd=input.selectionStart;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus({preventScroll:true})};
 updateUndoControls();
 $('newFolder').onclick=()=>createNamed('フォルダ名','新しいフォルダ',v=>mutate(()=>db.folders.push({id:uid(),name:v})));$('folderBack').onclick=()=>{openFolderId=null;$('search').value='';renderHome()};$('topAdd').onclick=()=>{if(page==='chat')pageTo('video');else if(page==='home')sheet('新規作成',host=>host.append(button('会話を作成',()=>{close();newProject()}),button('フォルダを作成',()=>{close();$('newFolder').click()})));else newProject()};$('search').oninput=renderHome;$('back').onclick=()=>pageTo(page==='video'?'chat':'home');document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>pageTo(b.dataset.page));$('shade').addEventListener('keydown',e=>{if(e.key==='Escape')close()});
 function finishEdit(){$('messages').style.paddingBottom='24px';cancelEditing();$('editNavigator').classList.add('hidden');activeMessage=null;$('messageTools').classList.remove('show');document.querySelectorAll('#messages .selected').forEach(n=>n.classList.remove('selected'))}
@@ -508,43 +509,68 @@ $('addCharacter').onclick=async()=>{const n=$('charName').value.trim();if(!n)ret
 for(const [id,key,cast] of [['bgColor','bg',String],['fontSize','font',Number],['bubbleGap','gap',Number],['interval','interval',Number],['speed','speed',Number]])$(id).oninput=e=>{db.settings[key]=cast(e.target.value);persist();renderSettings();updateChatSummary()};
 // Canvas video preview: pop-in only, no typing indicator.
 const imageCache={};function loadAvatar(c){if(!c.image||imageCache[c.id]?.src===c.image)return;const pic=new Image();pic.src=c.image;imageCache[c.id]=pic}
-const canvas=$('videoCanvas'),ctx=canvas.getContext('2d'),CW=360,CH=640;ctx.setTransform(3,0,0,3,0,0);
-function wrapText(text,max,font){ctx.font=font;const lines=[];for(const para of text.split('\n')){let line='';for(const ch of para){if(ctx.measureText(line+ch).width>max&&line){lines.push(line);line=ch}else line+=ch}lines.push(line)}return lines}
+const canvas=$('videoCanvas'),ctx=canvas.getContext('2d'),CW=390,CH=1920*390/1080;ctx.setTransform(1080/CW,0,0,1080/CW,0,0);let videoCaptureProject=null,videoCaptureSettings=null,videoExportProjectId=null;
+// Use the browser's own CSS line-breaking engine, rather than a separate
+// Canvas character-width algorithm. This preserves Japanese kinsoku and
+// ordinary whitespace wrapping in the same way as the chat bubbles.
+const measuredLineCache=new Map();
+function wrapText(text,max,font){
+ const key=JSON.stringify([text,max,font]);if(measuredLineCache.has(key))return measuredLineCache.get(key);
+ const container=document.createElement('div');container.style.cssText='position:fixed;left:-9999px;top:0;visibility:hidden;pointer-events:none;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;box-sizing:border-box;line-height:1.52;width:'+max+'px;font:'+font.replace('sans-serif','-apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif')+';';
+ const lines=[];document.body.append(container);
+ try{
+  const paragraphs=String(text).split('\n');
+  for(const paragraph of paragraphs){
+   if(!paragraph){lines.push('');continue}
+   container.textContent=paragraph;
+   const node=container.firstChild,range=document.createRange();let start=0,lastTop=null;
+   for(let pos=0;pos<paragraph.length;){const next=pos+(paragraph.codePointAt(pos)>65535?2:1);range.setStart(node,pos);range.setEnd(node,next);const rect=range.getBoundingClientRect();const top=Math.round(rect.top*2)/2;
+    if(lastTop!==null&&Math.abs(top-lastTop)>1){lines.push(paragraph.slice(start,pos));start=pos}
+    lastTop=top;pos=next;
+   }
+   lines.push(paragraph.slice(start));
+  }
+ }finally{container.remove()}
+ if(measuredLineCache.size>1200)measuredLineCache.clear();measuredLineCache.set(key,lines);
+ return lines;
+}
+
 function round(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
 let videoHitRects=[];function drawVideo(revealed,pop=0){
  videoHitRects=[];
- const p=getProject();ctx.fillStyle=db.settings.bg;ctx.fillRect(0,0,CW,CH);if(!p)return;
- const fontSize=Number(db.settings.font)||14, lineHeight=Math.round(fontSize*1.48);
- const padH=15,padV=10, maxBubble=266, minBubble=42;
- const gap=Math.max(4,Math.min(28,Number(db.settings.gap)||12));const showNames=db.settings.showNames!==false,nameSize=Number(db.settings.nameSize??14);
+ const settings=videoCaptureSettings||db.settings;
+ const p=videoCaptureProject||getProject();ctx.fillStyle=settings.bg;ctx.fillRect(0,0,CW,CH);if(!p)return;
+ const fontSize=Number(settings.font)||14, lineHeight=Math.round(fontSize*1.52);
+ const padH=18,padV=10, maxBubble=Math.min(520,Math.floor(Math.min(window.innerWidth,680)*.76)), minBubble=34;
+ const gap=Math.max(4,Math.min(28,Number(settings.gap)||12));const showNames=settings.showNames!==false,nameSize=Number(settings.nameSize??14);
  const layouts=[];
  for(let i=0;i<Math.min(revealed,p.messages.length);i++){
-  const m=p.messages[i],c=character(m.characterId);const textSize=m.side==='center'?(db.settings.narratorSize||14):fontSize;const lines=wrapText(m.text,maxBubble-padH*2,`${textSize}px sans-serif`);
+  const m=p.messages[i],c=character(m.characterId);const textSize=m.side==='center'?(settings.narratorSize||14):fontSize;const lines=wrapText(m.text,maxBubble-padH*2,`${textSize}px sans-serif`);
   ctx.font=`${fontSize}px sans-serif`;const maxLine=Math.max(0,...lines.map(x=>ctx.measureText(x).width));
   const w=Math.min(maxBubble,Math.max(minBubble,Math.ceil(maxLine+padH*2)));
-  const nameHeight=m.side==='center'||!showNames?0:nameSize+5;const effectiveLine=m.side==='center'?Math.round((db.settings.narratorSize||14)*1.48):lineHeight;const h=(m.side==='center'?Math.max(26,lines.length*effectiveLine+8):Math.max(40,lines.length*lineHeight+padV*2))+nameHeight;
+  const nameHeight=m.side==='center'||!showNames?0:nameSize+3;const effectiveLine=m.side==='center'?Math.round((settings.narratorSize||14)*1.48):lineHeight;const h=(m.side==='center'?Math.max(26,lines.length*effectiveLine+8):Math.max(40,lines.length*lineHeight+padV*2))+nameHeight;
   layouts.push({c,m,lines,w,h,index:i,nameHeight});
  }
- const padTop=25,padBottom=24;
- const full=layouts.reduce((sum,v)=>sum+v.h+gap,0)-gap;
+ const padTop=CH*.10,padBottom=CH*.10;
+ const full=Math.max(0,layouts.reduce((sum,v)=>sum+v.h+gap,0)-gap);
  let y=padTop-Math.max(0,full-(CH-padTop-padBottom));
- ctx.save();ctx.beginPath();ctx.rect(0,0,CW,CH);ctx.clip();
+ ctx.save();ctx.beginPath();ctx.rect(0,padTop,CW,CH-padTop-padBottom);ctx.clip();
  layouts.forEach(({c,m,lines,w,h,index,nameHeight})=>{
-  const center=m.side==='center',right=(m.side||c.side)==='right';const bx=center?(CW-w)/2:right?CW-59-w:59;const avatarX=right?CW-52:9;const contentY=y+nameHeight;
+  const center=m.side==='center',right=(m.side||c.side)==='right';const bx=center?(CW-w)/2:right?CW-62-w:62;const avatarX=right?CW-54:10;const contentY=y+nameHeight;
   videoHitRects.push({id:m.id,x:center?0:right?bx-4:avatarX-4,y:y-3,w:center?CW:(right?CW-bx+4:w+55),h:h+6});
   const alpha=(index===revealed-1&&pop>0)?1-pop*.6:1;
   ctx.save();ctx.globalAlpha=alpha;
   if(!center){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(avatarX+22,contentY+22,22,0,Math.PI*2);ctx.fill();
   if(c.image){const pic=imageCache[c.id];if(pic?.complete&&pic.naturalWidth){ctx.save();ctx.beginPath();ctx.arc(avatarX+22,contentY+22,22,0,Math.PI*2);ctx.clip();ctx.drawImage(pic,avatarX,contentY,44,44);ctx.restore()}else{loadAvatar(c);ctx.fillStyle='#333';ctx.font='31px sans-serif';ctx.fillText(c.icon||'🙂',avatarX+4,contentY+33)}}else{ctx.fillStyle='#333';ctx.font='31px sans-serif';ctx.fillText(c.icon||'🙂',avatarX+4,contentY+33)}
   if(showNames){ctx.font=nameSize+'px sans-serif';ctx.fillStyle='#273947';if(right){ctx.textAlign='right';ctx.fillText(c.name,CW-60,y+nameSize);ctx.textAlign='left'}else ctx.fillText(c.name,59,y+nameSize)}}
-  if(!center){ctx.fillStyle='#fff';round(bx,contentY,w,h-nameHeight,21)}
-  ctx.fillStyle='#172333';ctx.font=(center&&db.settings.narratorBold?'bold ':'')+`${center?(db.settings.narratorSize||14):fontSize}px sans-serif`;ctx.textBaseline='top';
-  if(center){ctx.textAlign='center';lines.forEach((t,j)=>ctx.fillText(t,CW/2,contentY+4+j*Math.round((db.settings.narratorSize||14)*1.48)));ctx.textAlign='left'}else lines.forEach((t,j)=>ctx.fillText(t,bx+padH,contentY+padV+j*lineHeight));
+  if(!center){ctx.fillStyle='#f9f9fa';round(bx,contentY,w,h-nameHeight,21);ctx.beginPath();if(right){ctx.moveTo(bx+w-2,contentY+14);ctx.lineTo(bx+w+10,contentY+17);ctx.lineTo(bx+w-2,contentY+29)}else{ctx.moveTo(bx+2,contentY+14);ctx.lineTo(bx-10,contentY+17);ctx.lineTo(bx+2,contentY+29)}ctx.closePath();ctx.fill()}
+  ctx.fillStyle='#172333';ctx.font=(center&&settings.narratorBold?'bold ':'')+`${center?(settings.narratorSize||14):fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;ctx.textBaseline='top';
+  if(center){ctx.textAlign='center';lines.forEach((t,j)=>ctx.fillText(t,CW/2,contentY+4+j*Math.round((settings.narratorSize||14)*1.48)));ctx.textAlign='left'}else lines.forEach((t,j)=>ctx.fillText(t,bx+padH,contentY+padV+j*lineHeight));
   ctx.textBaseline='alphabetic';ctx.restore();y+=h+gap;
  });ctx.restore();
 }
 
-let animationToken=0;async function animate(record){if(playing)return;const p=getProject();if(!p?.messages.length)return alert('動画にする会話を作成してください');if(record&&(!canvas.captureStream||!window.MediaRecorder))return alert('このブラウザでは動画書き出しに対応していません。別のブラウザを試してください。');playing=true;const token=++animationToken;$('preview').disabled=true;$('record').disabled=true;$('download').classList.add('hidden');if(record){$('progress').classList.remove('hidden');$('progress').value=0;$('videoProgressText').classList.remove('hidden');$('videoProgressText').textContent='描画進捗 0%';}let recorder=null,chunks=[],stream=null,recordType='';if(record){try{stream=canvas.captureStream(30);const formats=['video/mp4;codecs="avc1.42E01E"','video/mp4','video/webm;codecs=vp9','video/webm'];recordType=formats.find(x=>MediaRecorder.isTypeSupported(x))||'';recorder=new MediaRecorder(stream,recordType?{mimeType:recordType}:undefined);recordType=recorder.mimeType||recordType;recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.start(250)}catch(e){playing=false;$('preview').disabled=false;$('record').disabled=false;stream?.getTracks().forEach(t=>t.stop());return alert('動画録画を開始できませんでした：'+e.message)}}const delays=p.messages.map(m=>Math.max(.3,Number(m.videoInterval)||Number(db.settings.interval)||3)*1000/Number(db.settings.speed||1));const boundaries=[];let sum=0;delays.forEach(t=>{sum+=t;boundaries.push(sum)});const dur=sum+1300;const start=performance.now();$('videoStatus').textContent=record?'録画中…画面を閉じないでください':'プレビュー再生中…';await new Promise(resolve=>{function frame(now){const elapsed=Math.min(dur,now-start);const count=Math.min(p.messages.length,1+boundaries.filter(t=>t<=elapsed).length);const age=elapsed-(boundaries[count-2]||0);drawVideo(count,age<140?1-age/140:0);$('progress').value=elapsed/dur*100;if(record)$('videoProgressText').textContent='描画進捗 '+Math.min(99,Math.floor(elapsed/dur*100))+'%';if(elapsed<dur&&token===animationToken)requestAnimationFrame(frame);else resolve()}requestAnimationFrame(frame)});if(recorder){$('videoProgressText').textContent='描画完了・ファイル生成中…';const stopped=new Promise(resolve=>recorder.onstop=resolve);recorder.stop();await stopped;const type=recordType.includes('mp4')?'video/mp4':'video/webm',ext=type==='video/mp4'?'mp4':'webm',blob=new Blob(chunks,{type});const url=URL.createObjectURL(blob),a=$('download');a.href=url;a.download=(p.title||'会話動画')+'.'+ext;a.textContent='⬇ '+ext.toUpperCase()+'をダウンロード';a.classList.remove('hidden');$('videoStatus').textContent='動画が完成しました。下のボタンから保存できます。';$('progress').value=100;$('videoProgressText').textContent='100% 完了';stream?.getTracks().forEach(t=>t.stop())}else $('videoStatus').textContent='プレビューが終了しました';playing=false;$('preview').disabled=false;$('record').disabled=false;drawVideo(p.messages.length)}
+let animationToken=0;async function animate(record){if(playing)return;const p=getProject();if(!p?.messages.length)return alert('動画にする会話を作成してください');if(record&&(!canvas.captureStream||!window.MediaRecorder))return alert('このブラウザでは動画書き出しに対応していません。別のブラウザを試してください。');playing=true;if(record){videoCaptureProject=clone(p);videoCaptureSettings=clone(db.settings);videoExportProjectId=p.id;setVideoProgress(0,p.title,false,true)}const token=++animationToken;$('preview').disabled=true;$('record').disabled=true;$('download').classList.add('hidden');if(record){$('progress').classList.remove('hidden');$('progress').value=0;$('videoProgressText').classList.remove('hidden');$('videoProgressText').textContent='描画進捗 0%';}let recorder=null,chunks=[],stream=null,recordType='';if(record){try{stream=canvas.captureStream(30);const formats=['video/mp4;codecs="avc1.42E01E"','video/mp4','video/webm;codecs=vp9','video/webm'];recordType=formats.find(x=>MediaRecorder.isTypeSupported(x))||'';recorder=new MediaRecorder(stream,recordType?{mimeType:recordType}:undefined);recordType=recorder.mimeType||recordType;recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.start(250)}catch(e){playing=false;$('preview').disabled=false;$('record').disabled=false;stream?.getTracks().forEach(t=>t.stop());return alert('動画録画を開始できませんでした：'+e.message)}}const delays=p.messages.map(m=>Math.max(.3,Number(m.videoInterval)||Number(db.settings.interval)||3)*1000/Number(db.settings.speed||1));const boundaries=[];let sum=0;delays.forEach(t=>{sum+=t;boundaries.push(sum)});const dur=sum+1300;const start=performance.now();$('videoStatus').textContent=record?'録画中…画面を閉じないでください':'プレビュー再生中…';await new Promise(resolve=>{function frame(now){const elapsed=Math.min(dur,now-start);const count=Math.min(p.messages.length,1+boundaries.filter(t=>t<=elapsed).length);const age=elapsed-(boundaries[count-2]||0);drawVideo(count,age<140?1-age/140:0);$('progress').value=elapsed/dur*100;if(record){const percent=Math.min(99,Math.floor(elapsed/dur*100));$('videoProgressText').textContent='描画進捗 '+percent+'%';setVideoProgress(percent,p.title,false)}if(elapsed<dur&&token===animationToken)requestAnimationFrame(frame);else resolve()}requestAnimationFrame(frame)});if(recorder){$('videoProgressText').textContent='描画完了・ファイル生成中…';const stopped=new Promise(resolve=>recorder.onstop=resolve);recorder.stop();await stopped;const type=recordType.includes('mp4')?'video/mp4':'video/webm',ext=type==='video/mp4'?'mp4':'webm',blob=new Blob(chunks,{type});const url=URL.createObjectURL(blob),a=$('download');a.href=url;a.download=(p.title||'会話動画')+'.'+ext;a.textContent='⬇ '+ext.toUpperCase()+'をダウンロード';a.classList.remove('hidden');$('videoStatus').textContent='動画が完成しました。下のボタンから保存できます。';$('progress').value=100;$('videoProgressText').textContent='100% 完了';setVideoProgress(100,p.title,true);stream?.getTracks().forEach(t=>t.stop())}else $('videoStatus').textContent='プレビューが終了しました';playing=false;$('preview').disabled=false;$('record').disabled=false;if(record){videoCaptureProject=null;videoCaptureSettings=null} if(page==='video')drawVideo(p.messages.length)}
 // Horizontal icon strip: touch swipe, trackpad and mouse drag.
 (()=>{const strip=$('avatarStrip');let down=false,lastX=0,moved=false;
  strip.addEventListener('wheel',e=>{if(strip.scrollWidth<=strip.clientWidth)return;if(Math.abs(e.deltaY)>Math.abs(e.deltaX)){strip.scrollLeft+=e.deltaY;e.preventDefault()}},{passive:false});
@@ -560,19 +586,29 @@ const searchToggle=document.createElement('button');searchToggle.id='searchToggl
 const textMenu=document.createElement('button');textMenu.id='textMenu';textMenu.className='iconbtn head-extra hidden';textMenu.textContent='▤';textMenu.title='テキスト操作';header.insertBefore(textMenu,$('topAdd'));
 textMenu.onclick=()=>sheet('テキスト操作',host=>host.append(button('会話をテキストでコピー・書き出す',()=>openTextExport()),button('テキストを一括読み込み',()=>openTextImport()),button('閉じる',close)));
 const moreMenu=document.createElement('button');moreMenu.id='chatMore';moreMenu.className='iconbtn head-extra hidden';moreMenu.textContent='⋯';moreMenu.title='会話の操作';header.insertBefore(moreMenu,$('topAdd'));
+const menuIcons={
+ sort:'M3 7h18M3 12h18M3 17h18',
+ multi:'M8 6h13M8 12h13M8 18h13M3 6l1 1 2-3M3 12l1 1 2-3M3 18l1 1 2-3',
+ sides:'M4 12h16m-4-4 4 4-4 4M8 8l-4 4 4 4',
+ auto:'M5 4v16m6-13 5 5-5 5m5-5H7',
+ folder:'M3 7h7l2 3h9v10H3zM3 7V5h8l2 2',
+ undo:'M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-2',
+ close:'M5 5l14 14M19 5 5 19'
+};
+function menuItem(icon,title,handler){const b=button(title,handler);b.classList.add('menu-icon-action');const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',menuIcons[icon]);svg.append(path);b.prepend(svg);return b}
 function openChatOperations(){
  if(editingMessageId)saveEditing();
  sheet('会話の操作',host=>{
-  host.append(button('☰ コメントの並べ替え',()=>{close();dragList()}));
-  host.append(button('☑ コメントの複数選択',()=>{close();startBulk()}));
-  host.append(button('↔ キャラごとのコメント位置',()=>{close();openCharacterSideSettings()}));
-
-  host.append(button('⚙ 次のコメントを自動編集：'+(db.settings.autoNextEdit?'ON':'OFF'),()=>{close();openAutoNextSetting()}));
-  host.append(button('📁 フォルダへ移動',()=>{close();const p=getProject();if(p)chooseFolder(p)}));
-  host.append(button('↶ 直前の投稿を取り消す',()=>{close();undoRecentPost()}));
-  host.append(button('閉じる',close));
+  host.append(menuItem('sort','コメントの並べ替え',()=>{close();dragList()}));
+  host.append(menuItem('multi','コメントの複数選択',()=>{close();startBulk()}));
+  host.append(menuItem('sides','キャラごとのコメント位置',()=>{close();openCharacterSideSettings()}));
+  host.append(menuItem('auto','次のコメントを自動編集：'+(db.settings.autoNextEdit?'ON':'OFF'),()=>{close();openAutoNextSetting()}));
+  host.append(menuItem('folder','フォルダへ移動',()=>{close();const p=getProject();if(p)chooseFolder(p)}));
+  host.append(menuItem('undo','直前の投稿を取り消す',()=>{close();undoRecentPost()}));
+  host.append(menuItem('close','閉じる',close));
  });
 }
+
 moreMenu.onclick=openChatOperations;
 function undoRecentPost(){const p=getProject();if(!p||!lastPostedId||p.messages[p.messages.length-1]?.id!==lastPostedId)return alert('取り消せる直前の投稿がありません');const id=lastPostedId;lastPostedId=null;mutate(()=>p.messages=p.messages.filter(m=>m.id!==id))}
 const PHRASES_KEY='talkraft-quick-phrases';
@@ -652,9 +688,9 @@ $('narratorBold').onchange=e=>{db.settings.narratorBold=e.target.checked;persist
 function remindBackup(){let last=0;try{last=Number(localStorage.getItem('hitori-last-backup'))||0}catch{}if(Date.now()-last>=7*86400000&&db.projects.length){setTimeout(()=>{if(confirm('7日以上バックアップしていません。今バックアップを保存しますか？'))$('exportJson').click()},700)}}
 // Interactive preview clock. Export recording continues to use the existing renderer and timeline.
 let previewElapsed=0,previewRunning=false,previewRaf=0,previewLast=0,exporting=false;
-function timeline(){const p=getProject(),list=p?.messages||[];const speed=Number(db.settings.speed)||1;const delays=list.map(m=>Math.max(.3,Number(m.videoInterval)||Number(db.settings.interval)||3)*1000/speed);const boundaries=[];let sum=0;delays.forEach(d=>{sum+=d;boundaries.push(sum)});return {list,boundaries,duration:sum+1300};}
+function timeline(){const p=videoCaptureProject||getProject(),list=p?.messages||[];const speed=Number(db.settings.speed)||1;const delays=list.map(m=>Math.max(.3,Number(m.videoInterval)||Number(db.settings.interval)||3)*1000/speed);const boundaries=[];let sum=0;delays.forEach(d=>{sum+=d;boundaries.push(sum)});return {list,boundaries,duration:sum+1300};}
 function clockText(ms){const n=Math.floor(Math.max(0,ms)/1000);return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')}
-function paintPreview(){if(page!=='video')return;const t=timeline();previewElapsed=Math.max(0,Math.min(previewElapsed,t.duration));const count=t.list.length?Math.min(t.list.length,1+t.boundaries.filter(v=>v<=previewElapsed).length):0;const age=previewElapsed-(t.boundaries[count-2]||0);drawVideo(count,age<140?1-age/140:0);$('videoSeek').value=t.duration?Math.round(previewElapsed/t.duration*1000):0;$('videoClock').textContent=clockText(previewElapsed)+' / '+clockText(t.duration);$('preview').textContent=previewRunning?'⏸ 一時停止':'▶ 再生';}
+function paintPreview(){if(page!=='video')return;const t=timeline();previewElapsed=Math.max(0,Math.min(previewElapsed,t.duration));const count=t.list.length?Math.min(t.list.length,1+t.boundaries.filter(v=>v<=previewElapsed).length):0;const age=previewElapsed-(t.boundaries[count-2]||0);drawVideo(count,age<140?1-age/140:0);$('videoSeek').value=t.duration?Math.round(previewElapsed/t.duration*1000):0;$('videoClock').textContent=clockText(previewElapsed)+' / '+clockText(t.duration);const playButton=$('preview');if(playButton.dataset.playing!==String(previewRunning)){playButton.dataset.playing=String(previewRunning);playButton.innerHTML=previewRunning?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7z M14 5h4v14h-4z"/></svg><span>一時停止</span>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span>再生</span>'}updateVideoSettingsUI();}
 function pausePreview(){previewRunning=false;cancelAnimationFrame(previewRaf);previewRaf=0;paintPreview()}
 function tickPreview(now){if(!previewRunning||page!=='video'){pausePreview();return}previewElapsed+=Math.max(0,Math.min(100,now-previewLast));previewLast=now;const t=timeline();if(previewElapsed>=t.duration){previewElapsed=t.duration;pausePreview();$('videoStatus').textContent='プレビューが終了しました';return}paintPreview();previewRaf=requestAnimationFrame(tickPreview)}
 function togglePreview(){if(exporting)return;const t=timeline();if(!t.list.length)return alert('動画にする会話を作成してください');if(previewRunning){pausePreview();$('videoStatus').textContent='一時停止中';return}if(previewElapsed>=t.duration)previewElapsed=0;previewRunning=true;previewLast=performance.now();$('videoStatus').textContent='プレビュー再生中（コメントをタップして秒数変更）';paintPreview();previewRaf=requestAnimationFrame(tickPreview)}
@@ -665,7 +701,23 @@ $('videoSeek').oninput=e=>seekPreview(Number(e.target.value)/1000);
 $('preview').onclick=togglePreview;
 $('restartPreview').onclick=()=>seekPreview(0);
 $('record').onclick=async()=>{if(exporting)return;const t=timeline();if(!t.list.length)return alert('動画にする会話を作成してください');const mime=['video/mp4;codecs="avc1.42E01E"','video/mp4','video/webm;codecs=vp9','video/webm'].find(x=>window.MediaRecorder?.isTypeSupported(x));if(!confirm('動画を書き出しますか？\n\n解像度：1080 × 1920（9:16）\nコメント数：'+t.list.length+'件\n動画の長さ：約'+clockText(t.duration)+'\n出力形式：'+(mime?.includes('mp4')?'MP4':mime?'WebM':'この環境では未対応')))return;pausePreview();exporting=true;$('videoSeek').disabled=true;$('restartPreview').disabled=true;try{await animate(true)}finally{exporting=false;$('videoSeek').disabled=false;$('restartPreview').disabled=false;paintPreview()}};
-const previousPageTo=pageTo;pageTo=function(p){if(page==='video'&&p!=='video')pausePreview();previousPageTo(p);if(p==='video'){previewElapsed=0;paintPreview()}};
+const previousPageTo=pageTo;pageTo=function(p){const from=page;if(page==='video'&&p!=='video')pausePreview();previousPageTo(p);if(p==='chat'&&from!=='chat')showLastEditedJump();else if(p!=='chat')$('lastEditedJump').classList.add('hidden');if(p==='video'&&!exporting){previewElapsed=0;paintPreview()}};
+
+function updateVideoSettingsUI(){const el=$('videoIntervalDisplay');if(el)el.textContent=Number(db.settings.interval||3).toFixed(1)+'秒';const speed=$('videoSpeed');if(speed&&document.activeElement!==speed)speed.value=String(db.settings.speed||1)}
+$('videoSpeed').addEventListener('change',e=>{db.settings.speed=Number(e.target.value);persist();renderSettings();pausePreview();paintPreview();updateChatSummary()});
+function setVideoProgress(percent,title,done=false,expanded=false){const panel=$('videoFloating');panel.classList.remove('hidden');panel.classList.toggle('done',done);$('videoRing').style.strokeDashoffset=String(119.38*(1-percent/100));$('videoRingText').textContent=done?'✓':percent+'%';$('videoFloatState').textContent=done?'動画が完成しました':'動画を作成中… '+percent+'%';$('videoFloatTitle').textContent=title;$('videoFloatProgress').value=percent;$('videoFloatReturn').classList.toggle('hidden',!done);if(expanded)$('videoFloatingDetails').classList.remove('hidden')}
+$('videoFloatingMini').onclick=()=>{const details=$('videoFloatingDetails');details.classList.toggle('hidden');if($('videoFloating').classList.contains('done')&&details.classList.contains('hidden'))return};
+$('videoFloatCollapse').onclick=()=>{$('videoFloatingDetails').classList.add('hidden')};
+$('videoFloatReturn').onclick=()=>{if(videoExportProjectId&&db.projects.some(x=>x.id===videoExportProjectId))current=videoExportProjectId;pageTo('video');$('videoFloatingDetails').classList.add('hidden')};
+$('download').addEventListener('click',()=>{$('videoFloating').classList.add('hidden')});
+$('reloadApp').onclick=()=>sheet('アプリを再読み込みしますか？',host=>{const text=document.createElement('p');text.className='hint';text.textContent='再読み込み前にデータの保存・バックアップを確認してください。入力途中の内容が失われる可能性があります。';host.append(text,button('バックアップを保存',()=>{$('exportJson').click()}),button('キャンセル',close),button('再読み込み',async()=>{if(editingMessageId)saveEditing();try{await storageQueue}catch{}if(storageFailure)return alert('データを保存できていません。バックアップを確認してください。');location.reload()}))});
+
+const LAST_EDIT_KEY='talkraft-last-edited-v1';let lastEditedMemory={};
+function readLastEdit(){try{return {...JSON.parse(localStorage.getItem(LAST_EDIT_KEY)||'{}'),...lastEditedMemory}}catch{return lastEditedMemory}}
+function rememberEditedPosition(projectId,messageId){if(!projectId||!messageId)return;const all=readLastEdit();all[projectId]=messageId;lastEditedMemory=all;try{localStorage.setItem(LAST_EDIT_KEY,JSON.stringify(all))}catch{}}
+function showLastEditedJump(){const jump=$('lastEditedJump'),id=readLastEdit()[current];const m=getProject()?.messages.find(x=>x.id===id);jump.classList.toggle('hidden',!m);if(!m)return;clearTimeout(showLastEditedJump.hideTimer);showLastEditedJump.hideTimer=setTimeout(()=>jump.classList.add('hidden'),9000)}
+$('lastEditedButton').onclick=()=>{const id=readLastEdit()[current],row=[...$('messages').querySelectorAll('.message')].find(x=>x.dataset.messageId===id);$('lastEditedJump').classList.add('hidden');if(!row)return;const host=$('messages');const offset=row.offsetTop-host.offsetTop-Math.max(18,(host.clientHeight-row.offsetHeight)/2);host.scrollTo({top:Math.max(0,offset),behavior:'smooth'});row.classList.add('last-edited-highlight');setTimeout(()=>row.classList.remove('last-edited-highlight'),2400)};
+$('bulkCharacterSort').onclick=()=>sheet('キャラの一括並べ替え',host=>{const all=selectableCharacters(),selected=new Set();const search=document.createElement('input');search.className='field';search.placeholder='キャラ名を検索';const list=document.createElement('div');list.style.maxHeight='40dvh';list.style.overflowY='auto';function repaint(){list.replaceChildren();all.filter(c=>c.name.includes(search.value.trim())).forEach(c=>{const row=document.createElement('div');row.className='bulk-char-row';const check=document.createElement('input');check.type='checkbox';check.checked=selected.has(c.id);check.onchange=()=>check.checked?selected.add(c.id):selected.delete(c.id);const av=document.createElement('span');av.className='avatar';setIcon(av,c);const name=document.createElement('label');name.textContent=c.name;const small=document.createElement('small');small.textContent='登録順 '+(Number(c.createdOrder??db.characters.indexOf(c))+1);row.append(check,av,name,small);list.append(row)})}search.oninput=repaint;const sort=document.createElement('select');sort.className='field';[['created','登録が古い順（同名は登録順）'],['createdNew','登録が新しい順'],['name','名前順（同名は登録順）']].forEach(([value,label])=>{const opt=document.createElement('option');opt.value=value;opt.textContent=label;sort.append(opt)});const applyOrder=order=>{mutate(()=>order.forEach((c,i)=>c.displayOrder=i),'キャラの一括並べ替え');close()};const auto=button('全キャラを並べ替える',()=>{const order=[...selectableCharacters()];const created=c=>Number(c.createdOrder??db.characters.indexOf(c));order.sort((a,b)=>sort.value==='name'?a.name.localeCompare(b.name,'ja')||created(a)-created(b):sort.value==='createdNew'?created(b)-created(a):created(a)-created(b));applyOrder(order)});const top=button('選択したキャラを先頭へ',()=>{const order=selectableCharacters();applyOrder([...order.filter(c=>selected.has(c.id)),...order.filter(c=>!selected.has(c.id))])});const bottom=button('選択したキャラを末尾へ',()=>{const order=selectableCharacters();applyOrder([...order.filter(c=>!selected.has(c.id)),...order.filter(c=>selected.has(c.id))])});const actions=document.createElement('div');actions.className='bulk-char-actions';actions.append(top,bottom);host.append(sort,auto,search,list,actions,button('キャンセル',close));repaint()});
 if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(console.warn);initializeStorage().then(remindBackup);
 
 $('themeMode').addEventListener('change',e=>{try{localStorage.setItem(THEME_KEY,e.target.value)}catch(err){alert('テーマ設定を保存できませんでした')}applyTheme()});
